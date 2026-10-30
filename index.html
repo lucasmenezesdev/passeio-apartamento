@@ -1,0 +1,1029 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Passeio pelo apartamento</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#141312">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Apartamento">
+<link rel="apple-touch-icon" href="icone-180.png">
+<link rel="icon" href="icone-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600&family=Figtree:wght@400;500;600&display=swap">
+<style>
+  /* Layout: tela cheia 3D; HUD flutuante nos cantos (nome do cômodo, minimapa, comandos, botões). Visual único escuro de jogo. */
+  :root {
+    color-scheme: dark;
+    --bg: #141312;
+    --painel: rgba(22, 20, 18, 0.72);
+    --painel-forte: rgba(22, 20, 18, 0.9);
+    --borda: rgba(255, 244, 230, 0.14);
+    --texto: #f3eee7;
+    --texto-suave: #b9b0a5;
+    --acento: #d0794c;
+    --acento-forte: #e88a58;
+    --fonte-titulo: "Sora", "Segoe UI", system-ui, sans-serif;
+    --fonte: "Figtree", "Segoe UI", system-ui, sans-serif;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--texto);
+    font-family: var(--fonte);
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #cena { position: fixed; inset: 0; }
+  #cena canvas { display: block; width: 100%; height: 100%; outline: none; }
+
+  .painel {
+    background: var(--painel);
+    border: 1px solid var(--borda);
+    border-radius: 10px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  #topo {
+    position: fixed;
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    left: calc(16px + env(safe-area-inset-left, 0px));
+    padding: 10px 14px;
+    display: grid;
+    gap: 2px;
+    max-width: min(60vw, 320px);
+  }
+  #topo .rotulo {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--texto-suave);
+  }
+  #comodo {
+    font-family: var(--fonte-titulo);
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+  #mapa {
+    position: fixed;
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    right: calc(16px + env(safe-area-inset-right, 0px));
+    padding: 6px;
+    line-height: 0;
+  }
+  #mapa canvas { width: 240px; height: 150px; border-radius: 6px; }
+  #ajuda {
+    position: fixed;
+    left: calc(16px + env(safe-area-inset-left, 0px));
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    padding: 10px 14px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--texto-suave);
+    max-width: 330px;
+  }
+  #ajuda b { color: var(--texto); font-weight: 600; }
+  kbd {
+    font-family: var(--fonte);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--texto);
+    border: 1px solid var(--borda);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0 5px;
+    background: rgba(255, 255, 255, 0.06);
+  }
+  #botoes {
+    position: fixed;
+    right: calc(16px + env(safe-area-inset-right, 0px));
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 60vw;
+  }
+  button.acao {
+    font-family: var(--fonte);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--texto);
+    background: var(--painel-forte);
+    border: 1px solid var(--borda);
+    border-radius: 999px;
+    padding: 10px 16px;
+    cursor: pointer;
+  }
+  button.acao:hover { border-color: var(--acento); }
+  button.acao:focus-visible { outline: 2px solid var(--acento-forte); outline-offset: 2px; }
+  button.acao[aria-pressed="true"] { background: var(--acento); border-color: var(--acento); color: #1b120d; }
+
+  #joystick {
+    position: fixed;
+    width: 120px;
+    height: 120px;
+    margin: -60px 0 0 -60px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 244, 230, 0.35);
+    background: rgba(22, 20, 18, 0.35);
+    pointer-events: none;
+  }
+  #joystick span {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 52px;
+    height: 52px;
+    margin: -26px 0 0 -26px;
+    border-radius: 50%;
+    background: rgba(232, 138, 88, 0.85);
+  }
+
+  #carregando {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--bg);
+    z-index: 20;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  #carregando .caixa { display: grid; gap: 14px; width: min(320px, 100%); }
+  #carregando h1 { font-family: var(--fonte-titulo); font-size: 22px; font-weight: 600; margin: 0; }
+  #carregando p { margin: 0; color: var(--texto-suave); font-size: 14px; line-height: 1.5; }
+  .barra { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+  .barra i { display: block; height: 100%; width: 0%; background: var(--acento); transition: width 0.2s; }
+
+  /* modo imersivo: só o apartamento (e o joystick no celular) */
+  body.imersivo #topo, body.imersivo #mapa, body.imersivo #ajuda,
+  body.imersivo #botoes, body.imersivo #dica { display: none !important; }
+  #btn-sair-imersivo {
+    position: fixed;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    font-size: 12px;
+    padding: 6px 12px;
+    opacity: 0.5;
+  }
+  #btn-sair-imersivo:hover, #btn-sair-imersivo:focus-visible { opacity: 1; }
+
+  #joystick.repouso {
+    left: calc(28px + env(safe-area-inset-left, 0px));
+    top: auto;
+    bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+    margin: 0;
+    opacity: 0.55;
+  }
+  #dica {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    padding: 10px 14px;
+    font-size: 14px;
+    line-height: 1.45;
+    text-align: center;
+    width: max-content;
+    max-width: calc(100% - 32px);
+    transition: opacity 0.4s;
+    pointer-events: none;
+  }
+  #dica.sumindo { opacity: 0; }
+
+  #girar {
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    display: grid;
+    place-items: center;
+    background: rgba(20, 19, 18, 0.9);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  #girar .caixa { display: grid; gap: 18px; justify-items: center; text-align: center; max-width: 280px; }
+  #girar p { margin: 0; font-size: 16px; line-height: 1.5; text-wrap: balance; }
+  .celular {
+    width: 44px;
+    height: 76px;
+    border: 3px solid var(--texto);
+    border-radius: 9px;
+    animation: girar-celular 2.4s ease-in-out infinite;
+  }
+  @keyframes girar-celular {
+    0%, 25% { transform: rotate(0deg); }
+    55%, 100% { transform: rotate(-90deg); }
+  }
+  @media (prefers-reduced-motion: reduce) { .celular { animation: none; transform: rotate(-90deg); } }
+
+  @media (max-width: 640px) {
+    #mapa canvas { width: 168px; height: 105px; }
+    #comodo { font-size: 17px; }
+    #ajuda { display: none; }
+  }
+  /* celular/tablet: só o essencial, longe dos polegares */
+  @media (pointer: coarse) {
+    #ajuda { display: none; }
+    #topo {
+      top: calc(10px + env(safe-area-inset-top, 0px));
+      left: calc(10px + env(safe-area-inset-left, 0px));
+      padding: 5px 10px;
+    }
+    #topo .rotulo { display: none; }
+    #comodo { font-size: 14px; }
+    #mapa {
+      top: calc(10px + env(safe-area-inset-top, 0px));
+      right: calc(10px + env(safe-area-inset-right, 0px));
+      padding: 3px;
+    }
+    #mapa canvas { width: 124px; height: 78px; border-radius: 5px; }
+    #botoes {
+      top: calc(100px + env(safe-area-inset-top, 0px));
+      right: calc(10px + env(safe-area-inset-right, 0px));
+      bottom: auto;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+    button.acao { font-size: 12px; padding: 7px 12px; }
+  }
+</style>
+
+<div id="cena"></div>
+
+<div id="topo" class="painel" aria-live="polite">
+  <span class="rotulo">Você está em</span>
+  <span id="comodo">Entrada</span>
+</div>
+
+<div id="mapa" class="painel"><canvas id="minimapa" width="480" height="300" aria-label="Minimapa da planta com a sua posição"></canvas></div>
+
+<div id="ajuda" class="painel">
+  <b>Andar</b> <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> ou setas · <kbd>Shift</kbd> corre<br>
+  <b>Olhar</b> arraste o mouse (ou clique para travar o cursor, <kbd>Esc</kbd> solta)<br>
+  <b>Câmera</b> roda do mouse aproxima · <kbd>V</kbd> 1ª/3ª pessoa · <kbd>T</kbd> teto<br>
+  <b>Modo imersivo</b> <kbd>F</kbd> entra e sai
+</div>
+
+<div id="botoes">
+  <button id="btn-visao" class="acao" type="button" aria-pressed="false">1ª pessoa</button>
+  <button id="btn-teto" class="acao" type="button" aria-pressed="true">Teto</button>
+  <button id="btn-imersivo" class="acao" type="button">Modo imersivo</button>
+</div>
+<button id="btn-sair-imersivo" class="acao" type="button" aria-label="Sair do modo imersivo" hidden>Sair</button>
+
+<div id="joystick" hidden><span></span></div>
+<div id="dica" class="painel" hidden>Arraste do lado <b>esquerdo</b> para andar<br>e do lado <b>direito</b> para olhar</div>
+
+<div id="girar" hidden>
+  <div class="caixa">
+    <div class="celular" aria-hidden="true"></div>
+    <p>Gire o celular para a horizontal para andar com os dois polegares.</p>
+    <button id="btn-continuar" class="acao" type="button">Continuar na vertical</button>
+  </div>
+</div>
+
+<div id="carregando">
+  <div class="caixa">
+    <h1>Passeio pelo apartamento</h1>
+    <p id="status">Carregando o apartamento em 3D…</p>
+    <div class="barra"><i id="progresso"></i></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+// ---------- coordenadas da planta (cm): x da esquerda p/ direita, d de cima p/ baixo ----------
+const D0 = 663;
+const paraMundo = (x, d) => new THREE.Vector3(x / 100, 0, (d - D0) / 100);
+const paraPlanta = (v) => ({ x: v.x * 100, d: v.z * 100 + D0 });
+
+const COMODOS = [
+  ["Banheiro social", 464, 688, 10, 133],
+  ["Banheiro da suíte", 700, 927, 10, 133],
+  ["Circulação", 454, 598, 143, 246],
+  ["Suíte", 598, 927, 143, 478],
+  ["Escritório", 435, 656, 256, 620],
+  ["Cozinha e área de serviço", 10, 162, 148, 537],
+  ["Varanda", 172, 435, 492, 663],
+  ["Varanda", 10, 172, 547, 663],
+  ["Área técnica", 666, 927, 488, 545],
+  ["Entrada", 172, 300, 10, 120],
+  ["Mesa de jantar", 300, 454, 10, 200],
+  ["Sala de estar", 162, 454, 10, 482],
+];
+const nomeDoComodo = ({ x, d }) => (COMODOS.find(([, x0, x1, d0, d1]) => x >= x0 && x <= x1 && d >= d0 && d <= d1) || ["Apartamento"])[0];
+
+const toque = matchMedia("(pointer: coarse)").matches;
+
+// ---------- ajustes de luz e do boneco ----------
+const EXPOSICAO = 0.9;
+const LUZ_AMBIENTE = 0.45;   // reflexo do ambiente nos materiais (1 = padrão, estourava)
+const ALTURA = 1.60;         // altura do boneco em metros
+const OLHOS = ALTURA - 0.10; // visão em 1ª pessoa
+
+// ---------- renderer e cena ----------
+const container = document.getElementById("cena");
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(devicePixelRatio, toque ? 1.5 : 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.AgXToneMapping ?? THREE.ACESFilmicToneMapping;  // mesmo tratamento de cor do Blender
+renderer.toneMappingExposure = EXPOSICAO;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
+renderer.domElement.tabIndex = 0;
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+scene.background = ceuTextura();
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 80);
+
+scene.add(new THREE.HemisphereLight(0xe6eef6, 0x8c7f70, 0.3));
+const sol = new THREE.DirectionalLight(0xfff0dc, 2.4);
+const centro = paraMundo(468, 331);
+sol.position.copy(centro).add(new THREE.Vector3(-0.55, 0.38, 0.75).normalize().multiplyScalar(22));
+sol.target.position.copy(centro);
+sol.castShadow = true;
+sol.shadow.mapSize.set(toque ? 1024 : 2048, toque ? 1024 : 2048);
+Object.assign(sol.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 50 });
+sol.shadow.bias = -0.0004;
+sol.shadow.normalBias = 0.03;
+scene.add(sol, sol.target);
+
+// luzes quentes dos spots, uma por ambiente
+for (const [x, d, forca] of [[300, 300, 9], [300, 440, 7], [300, 120, 7], [100, 300, 6], [545, 440, 8],
+                              [790, 330, 8], [575, 75, 4], [810, 75, 4], [250, 600, 5], [520, 195, 4]]) {
+  const l = new THREE.PointLight(0xffc996, forca * 0.6, 7, 2);
+  l.position.copy(paraMundo(x, d)).setY(2.35);
+  scene.add(l);
+}
+
+// ---------- texturas desenhadas na página (metros por repetição) ----------
+function aleatorio(semente) {
+  return () => {
+    semente |= 0; semente = (semente + 0x6d2b79f5) | 0;
+    let t = Math.imul(semente ^ (semente >>> 15), 1 | semente);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function texturaCanvas(w, h, metros, desenhar, cor = true) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  desenhar(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c);
+  if (cor) t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.repeat.set(1 / metros[0], 1 / metros[1]);
+  return t;
+}
+const rgb = (r, g, b) => `rgb(${r | 0},${g | 0},${b | 0})`;
+
+function texTabuas() { // piso vinílico: tábuas de 20 x 125 cm, 4 px/cm
+  return texturaCanvas(1000, 800, [2.5, 2.0], (g, w, h) => {
+    const r = aleatorio(7), alt = 80, comp = 500;
+    for (let linha = 0; linha < h / alt; linha++) {
+      const desloc = (linha * 0.37 * comp) % comp;
+      for (let x = -desloc; x < w; x += comp) {
+        const v = r() * 18 - 9;
+        g.fillStyle = rgb(192 + v, 167 + v * 0.9, 134 + v * 0.8);
+        g.fillRect(x, linha * alt, comp, alt);
+        for (let k = 0; k < 26; k++) { // veios
+          g.strokeStyle = `rgba(110, 80, 50, ${0.04 + r() * 0.07})`;
+          g.lineWidth = 1 + r() * 1.5;
+          const y = linha * alt + r() * alt;
+          g.beginPath(); g.moveTo(x, y);
+          g.bezierCurveTo(x + comp * 0.3, y + r() * 6 - 3, x + comp * 0.6, y + r() * 6 - 3, x + comp, y + r() * 4 - 2);
+          g.stroke();
+        }
+        g.fillStyle = "rgba(90, 68, 46, 0.55)";
+        g.fillRect(x, linha * alt, 2, alt);
+      }
+      g.fillStyle = "rgba(90, 68, 46, 0.55)";
+      g.fillRect(0, linha * alt, w, 2);
+    }
+  });
+}
+function texLadrilho(metrosLado, cols, rows, base, rejunte, semente, larguraM = metrosLado, alturaM = metrosLado) {
+  const pxM = 400;
+  return texturaCanvas(Math.round(larguraM * cols * pxM), Math.round(alturaM * rows * pxM), [larguraM * cols, alturaM * rows], (g, w, h) => {
+    const r = aleatorio(semente);
+    g.fillStyle = rgb(...rejunte); g.fillRect(0, 0, w, h);
+    const tw = w / cols, th = h / rows;
+    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+      const v = r() * 6 - 3;
+      g.fillStyle = rgb(base[0] + v, base[1] + v, base[2] + v);
+      g.fillRect(i * tw + 1.5, j * th + 1.5, tw - 3, th - 3);
+      for (let k = 0; k < 40; k++) { // leve mármore no porcelanato
+        g.fillStyle = `rgba(150, 145, 138, ${r() * 0.04})`;
+        g.beginPath(); g.arc(i * tw + r() * tw, j * th + r() * th, 6 + r() * 30, 0, Math.PI * 2); g.fill();
+      }
+    }
+  });
+}
+function texMetro() { // azulejo metrô 15 x 7,5 cm
+  return texturaCanvas(480, 480, [0.6, 0.6], (g, w, h) => {
+    g.fillStyle = rgb(205, 205, 202); g.fillRect(0, 0, w, h);
+    const tw = w / 4, th = h / 8;
+    for (let j = 0; j < 8; j++) for (let i = -1; i < 5; i++) {
+      const x = i * tw + (j % 2) * tw / 2;
+      g.fillStyle = rgb(246, 246, 244); g.fillRect(x + 1.5, j * th + 1.5, tw - 3, th - 3);
+    }
+  });
+}
+function texMadeira(base, semente) { // veio vertical
+  return texturaCanvas(512, 512, [1, 1], (g, w, h) => {
+    const r = aleatorio(semente);
+    g.fillStyle = rgb(...base); g.fillRect(0, 0, w, h);
+    for (let k = 0; k < 160; k++) {
+      const x = r() * w, escuro = r() < 0.5;
+      g.strokeStyle = escuro ? `rgba(60, 38, 20, ${0.05 + r() * 0.08})` : `rgba(255, 230, 200, ${0.03 + r() * 0.05})`;
+      g.lineWidth = 1 + r() * 3;
+      g.beginPath(); g.moveTo(x, 0);
+      g.bezierCurveTo(x + r() * 16 - 8, h * 0.33, x + r() * 16 - 8, h * 0.66, x + r() * 10 - 5, h);
+      g.stroke();
+    }
+  });
+}
+function texMarmore() {
+  return texturaCanvas(512, 512, [1, 1], (g, w, h) => {
+    const r = aleatorio(11);
+    g.fillStyle = rgb(242, 240, 236); g.fillRect(0, 0, w, h);
+    for (let k = 0; k < 14; k++) {
+      g.strokeStyle = `rgba(150, 145, 140, ${0.15 + r() * 0.35})`;
+      g.lineWidth = 0.6 + r() * 2.2;
+      g.beginPath();
+      let x = r() * w, y = r() * h;
+      g.moveTo(x, y);
+      for (let s = 0; s < 6; s++) { x += r() * 120 - 60; y += r() * 120 - 40; g.lineTo(x, y); }
+      g.stroke();
+    }
+  });
+}
+function texTecido(semente) { // trama sutil (cinza claro, multiplica a cor do material)
+  return texturaCanvas(256, 256, [0.25, 0.25], (g, w, h) => {
+    const r = aleatorio(semente);
+    g.fillStyle = "#f2f2f2"; g.fillRect(0, 0, w, h);
+    for (let y = 0; y < h; y += 2) { g.fillStyle = `rgba(0,0,0,${0.02 + r() * 0.04})`; g.fillRect(0, y, w, 1); }
+    for (let x = 0; x < w; x += 2) { g.fillStyle = `rgba(0,0,0,${0.01 + r() * 0.03})`; g.fillRect(x, 0, 1, h); }
+  });
+}
+function texArte(cores, semente) {
+  return texturaCanvas(256, 320, [0.5, 0.65], (g, w, h) => {
+    const r = aleatorio(semente);
+    g.fillStyle = cores[0]; g.fillRect(0, 0, w, h);
+    for (let k = 0; k < 9; k++) {
+      g.fillStyle = cores[1 + (k % (cores.length - 1))];
+      g.beginPath();
+      const cx = r() * w, cy = r() * h, rr = 30 + r() * 70;
+      for (let a = 0; a <= 12; a++) {
+        const ang = (a / 12) * Math.PI * 2, rad = rr * (0.7 + r() * 0.5);
+        const px = cx + Math.cos(ang) * rad, py = cy + Math.sin(ang) * rad;
+        a ? g.lineTo(px, py) : g.moveTo(px, py);
+      }
+      g.closePath(); g.fill();
+    }
+  });
+}
+function texTela() {
+  return texturaCanvas(256, 160, [0.6, 0.36], (g, w, h) => {
+    const grad = g.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, "#14204a"); grad.addColorStop(0.55, "#3c2f7a"); grad.addColorStop(1, "#7a4aa8");
+    g.fillStyle = grad; g.fillRect(0, 0, w, h);
+    g.fillStyle = "rgba(255,255,255,0.12)"; g.fillRect(0, h - 14, w, 14);
+  });
+}
+function ceuTextura() {
+  const c = document.createElement("canvas");
+  c.width = 16; c.height = 256;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "#6f9fd0"); grad.addColorStop(0.45, "#cfe0ee"); grad.addColorStop(0.5, "#e9eef2");
+  grad.addColorStop(0.56, "#c9ccce"); grad.addColorStop(1, "#9ea2a6");
+  g.fillStyle = grad; g.fillRect(0, 0, 16, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// ---------- materiais por nome (os do Blender são procedurais e não vêm no GLB) ----------
+const tecido = texTecido(5);
+const TEC = (cor) => new THREE.MeshStandardMaterial({ color: cor, map: tecido, roughness: 0.92 });
+const vidro = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.04, metalness: 0, transparent: true,
+                                               opacity: 0.16, depthWrite: false });
+const SOBRESCREVER = {
+  "Piso vinílico madeira": () => new THREE.MeshStandardMaterial({ map: texTabuas(), roughness: 0.5 }),
+  "Porcelanato 60x60": () => new THREE.MeshStandardMaterial({ map: texLadrilho(0.6, 2, 2, [232, 230, 226], [200, 198, 194], 3), roughness: 0.22 }),
+  "Porcelanato varanda": () => new THREE.MeshStandardMaterial({ map: texLadrilho(0.6, 2, 2, [214, 208, 198], [185, 180, 172], 4), roughness: 0.4 }),
+  "Porcelanato parede XZ": () => new THREE.MeshStandardMaterial({ map: texLadrilho(0.6, 2, 2, [226, 222, 216], [198, 194, 188], 6, 0.6, 1.2), roughness: 0.28 }),
+  "Porcelanato parede YZ": () => new THREE.MeshStandardMaterial({ map: texLadrilho(0.6, 2, 2, [226, 222, 216], [198, 194, 188], 6, 0.6, 1.2), roughness: 0.28 }),
+  "Azulejo metrô branco": () => new THREE.MeshStandardMaterial({ map: texMetro(), roughness: 0.15 }),
+  "Madeira freijó": () => new THREE.MeshStandardMaterial({ map: texMadeira([190, 154, 112], 21), roughness: 0.5 }),
+  "Madeira nogueira": () => new THREE.MeshStandardMaterial({ map: texMadeira([116, 80, 52], 22), roughness: 0.5 }),
+  "Mármore branco": () => new THREE.MeshStandardMaterial({ map: texMarmore(), roughness: 0.18 }),
+  "Tecido sofá cinza": () => TEC(0xa8a29a),
+  "Tecido almofada areia": () => TEC(0xd6ccbc),
+  "Tecido almofada terracota": () => TEC(0xb06646),
+  "Tecido cadeira bege": () => TEC(0xdcd2c2),
+  "Tapete lã": () => TEC(0xc6beb2),
+  "Feltro mousepad": () => TEC(0x34363a),
+  "Tecido cadeira escritório": () => TEC(0x2e2f33),
+  "Edredom": () => TEC(0xe4e0d8),
+  "Lençol branco": () => TEC(0xf5f3ef),
+  "Manta terracota": () => TEC(0x985e44),
+  "Estofado cabeceira": () => TEC(0xc6b6a2),
+  "Arte abstrata 1": () => new THREE.MeshStandardMaterial({ map: texArte(["#e8dece", "#c4784f", "#4e5c52", "#d9cbb6"], 31), roughness: 0.85 }),
+  "Arte abstrata 2": () => new THREE.MeshStandardMaterial({ map: texArte(["#d6c8b4", "#966e50", "#ece4d6", "#78806f"], 32), roughness: 0.85 }),
+  "Tela ligada": () => new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: texTela(), emissiveIntensity: 1.1 }),
+  "Vidro": () => vidro,
+  "Globo de vidro": () => vidro,
+  "Cortina voil": () => new THREE.MeshStandardMaterial({ color: 0xf6f3ee, transparent: true, opacity: 0.55, side: THREE.DoubleSide, roughness: 1, depthWrite: false }),
+  "Vidro fumê bronze": () => new THREE.MeshStandardMaterial({ color: 0x3a2c22, roughness: 0.08, metalness: 0.45 }),
+  "Espelho": () => new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.02, metalness: 1 }),
+  "LED quente": () => new THREE.MeshBasicMaterial({ color: 0xffe2bf }),
+  "LED gabinete": () => new THREE.MeshBasicMaterial({ color: 0x9a6bff }),
+  "Lâmpada pendente": () => new THREE.MeshBasicMaterial({ color: 0xffdcb4 }),
+  "Filamento": () => new THREE.MeshBasicMaterial({ color: 0xffc58a }),
+};
+const cacheMat = new Map();
+const nomeBase = (n) => (n || "").replace(/\.\d+$/, "");
+function material(orig) {
+  const n = nomeBase(orig.name);
+  if (!SOBRESCREVER[n]) return orig;
+  if (!cacheMat.has(n)) cacheMat.set(n, SOBRESCREVER[n]());
+  return cacheMat.get(n);
+}
+const precisaUV = (m) => !!(m.map || m.emissiveMap);
+
+// UV em metros projetadas pela face dominante (as peças vêm do Blender sem UV)
+function uvCaixa(mesh) {
+  const g = mesh.geometry, pos = g.attributes.position, nor = g.attributes.normal;
+  if (!nor) return;
+  const uv = new Float32Array(pos.count * 2);
+  const nm = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+  const p = new THREE.Vector3(), n = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    p.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+    n.fromBufferAttribute(nor, i).applyMatrix3(nm);
+    const ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+    if (ay >= ax && ay >= az) { uv[i * 2] = p.x; uv[i * 2 + 1] = p.z; }
+    else if (ax >= az) { uv[i * 2] = p.z; uv[i * 2 + 1] = p.y; }
+    else { uv[i * 2] = p.x; uv[i * 2 + 1] = p.y; }
+  }
+  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+}
+
+// ---------- colisão: caixas no plano (para o boneco) e em 3D (para a câmera não atravessar paredes) ----------
+const colisores = [];   // {x0, x1, z0, z1}
+const caixas3D = [];    // THREE.Box3 de paredes/móveis + teto
+const tetoObjs = [];
+let caixaTeto = null;
+const SEM_COLISAO = /^(Piso|Laje|Tapete|Cortina|Pendente|Quadro|Fita LED|LED|Spot)/;
+
+// ---------- boneco ----------
+function criarBoneco() {
+  const grupo = new THREE.Group();
+  const pele = new THREE.MeshStandardMaterial({ color: 0xc89c7c, roughness: 0.6 });
+  const camisa = new THREE.MeshStandardMaterial({ color: 0xd0794c, roughness: 0.8 });
+  const calca = new THREE.MeshStandardMaterial({ color: 0x2f3440, roughness: 0.85 });
+  const tenis = new THREE.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.6 });
+  const cabelo = new THREE.MeshStandardMaterial({ color: 0x2a211b, roughness: 0.9 });
+  const parte = (geo, mat) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; return m; };
+
+  const tronco = parte(new THREE.CapsuleGeometry(0.17, 0.42, 6, 16), camisa);
+  tronco.position.y = 1.2; tronco.scale.set(1, 1, 0.68);
+  const cabeca = parte(new THREE.SphereGeometry(0.11, 24, 16), pele);
+  cabeca.position.y = 1.62;
+  const cab = parte(new THREE.SphereGeometry(0.115, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), cabelo);
+  cab.position.y = 1.635; cab.rotation.x = -0.25;
+  const pescoco = parte(new THREE.CylinderGeometry(0.045, 0.05, 0.08, 12), pele);
+  pescoco.position.y = 1.5;
+  grupo.add(tronco, cabeca, cab, pescoco);
+
+  const membro = (raio, comp, mat, x, y, pe) => {
+    const pivo = new THREE.Group();
+    pivo.position.set(x, y, 0);
+    const m = parte(new THREE.CapsuleGeometry(raio, comp, 4, 12), mat);
+    m.position.y = -(comp / 2 + raio);
+    pivo.add(m);
+    if (pe) {
+      const p = parte(new THREE.BoxGeometry(0.1, 0.07, 0.24), tenis);
+      p.position.set(0, -(comp + raio * 2) + 0.02, 0.05);
+      pivo.add(p);
+    }
+    grupo.add(pivo);
+    return pivo;
+  };
+  const pernaE = membro(0.075, 0.68, calca, -0.09, 0.95, true);
+  const pernaD = membro(0.075, 0.68, calca, 0.09, 0.95, true);
+  const bracoE = membro(0.05, 0.5, camisa, -0.24, 1.43, false);
+  const bracoD = membro(0.05, 0.5, camisa, 0.24, 1.43, false);
+  const maoE = parte(new THREE.SphereGeometry(0.05, 12, 10), pele); maoE.position.y = -0.62; bracoE.add(maoE);
+  const maoD = parte(new THREE.SphereGeometry(0.05, 12, 10), pele); maoD.position.y = -0.62; bracoD.add(maoD);
+  grupo.userData = { pernaE, pernaD, bracoE, bracoD, tronco };
+  return grupo;
+}
+const boneco = criarBoneco();
+boneco.scale.setScalar(ALTURA / 1.75);  // o modelo foi desenhado com 1,75 m (até o topo do cabelo)
+scene.add(boneco);
+
+// ---------- estado do jogador ----------
+const RAIO = 0.22;
+const jogador = { pos: paraMundo(305, 395), yaw: Math.PI - 0.15, pitch: 0.3, pitchFP: -0.05, dist: 2.4,
+                  primeira: false, fase: 0, vel: 0 };
+const teclas = new Set();
+const joy = { ativo: false, id: null, x0: 0, y0: 0, dx: 0, dy: 0 };
+const olhar = { id: null, x: 0, y: 0 };
+
+function resolverColisao(p) {
+  for (let it = 0; it < 3; it++) {
+    for (const c of colisores) {
+      const cx = Math.max(c.x0, Math.min(p.x, c.x1)), cz = Math.max(c.z0, Math.min(p.z, c.z1));
+      let dx = p.x - cx, dz = p.z - cz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= RAIO * RAIO) continue;
+      if (d2 > 1e-10) {
+        const d = Math.sqrt(d2), empurra = RAIO - d;
+        p.x += (dx / d) * empurra; p.z += (dz / d) * empurra;
+      } else { // centro dentro da caixa: sai pelo lado mais próximo
+        const op = [[p.x - c.x0 + RAIO, -1, 0], [c.x1 - p.x + RAIO, 1, 0], [p.z - c.z0 + RAIO, 0, -1], [c.z1 - p.z + RAIO, 0, 1]]
+          .sort((a, b) => a[0] - b[0])[0];
+        p.x += op[1] * op[0]; p.z += op[2] * op[0];
+      }
+    }
+  }
+}
+
+const raioTmp = new THREE.Ray();
+const pontoTmp = new THREE.Vector3();
+function distanciaLivre(origem, destino) {
+  const dir = destino.clone().sub(origem), max = dir.length();
+  dir.normalize();
+  raioTmp.set(origem, dir);
+  let melhor = max;
+  for (const b of caixas3D) {
+    if (b === caixaTeto && !tetoVisivel) continue;
+    if (b.containsPoint(origem)) continue;
+    if (raioTmp.intersectBox(b, pontoTmp)) {
+      const d = pontoTmp.distanceTo(origem);
+      if (d < melhor) melhor = d;
+    }
+  }
+  return Math.max(0.15, melhor - 0.18);
+}
+
+// ---------- entrada ----------
+const tela = renderer.domElement;
+addEventListener("keydown", (e) => {
+  if (e.target.closest && e.target.closest("button")) return;
+  teclas.add(e.code);
+  if (e.code === "KeyV") alternarVisao();
+  if (e.code === "KeyT") alternarTeto();
+});
+addEventListener("keyup", (e) => teclas.delete(e.code));
+addEventListener("blur", () => teclas.clear());
+
+function girar(dx, dy) {
+  jogador.yaw -= dx * 0.0045;
+  if (jogador.primeira) jogador.pitchFP = THREE.MathUtils.clamp(jogador.pitchFP - dy * 0.0035, -1.2, 1.2);
+  else jogador.pitch = THREE.MathUtils.clamp(jogador.pitch + dy * 0.0035, -0.25, 1.1);
+}
+
+tela.addEventListener("pointerdown", (e) => {
+  tela.focus();
+  if (e.pointerType === "touch") {
+    esconderDica();
+    if (e.clientX < innerWidth * 0.45 && !joy.ativo) {
+      Object.assign(joy, { ativo: true, id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0 });
+      const j = document.getElementById("joystick");
+      j.classList.remove("repouso");
+      j.style.left = e.clientX + "px"; j.style.top = e.clientY + "px"; j.hidden = false;
+    } else if (olhar.id === null) {
+      Object.assign(olhar, { id: e.pointerId, x: e.clientX, y: e.clientY });
+    }
+    tela.setPointerCapture(e.pointerId);
+    return;
+  }
+  if (document.pointerLockElement !== tela) {
+    try { const r = tela.requestPointerLock?.(); r?.catch?.(() => {}); } catch (_) { /* opcional */ }
+  }
+  Object.assign(olhar, { id: e.pointerId, x: e.clientX, y: e.clientY });
+});
+tela.addEventListener("pointermove", (e) => {
+  if (document.pointerLockElement === tela) { girar(e.movementX, e.movementY); return; }
+  if (e.pointerId === joy.id) {
+    let dx = e.clientX - joy.x0, dy = e.clientY - joy.y0;
+    const len = Math.hypot(dx, dy), max = 50;
+    if (len > max) { dx *= max / len; dy *= max / len; }
+    joy.dx = dx / max; joy.dy = dy / max;
+    document.querySelector("#joystick span").style.transform = `translate(${dx}px, ${dy}px)`;
+  } else if (e.pointerId === olhar.id) {
+    girar((e.clientX - olhar.x) * (e.pointerType === "touch" ? 1.4 : 1), (e.clientY - olhar.y) * (e.pointerType === "touch" ? 1.4 : 1));
+    olhar.x = e.clientX; olhar.y = e.clientY;
+  }
+});
+function soltar(e) {
+  if (e.pointerId === joy.id) {
+    Object.assign(joy, { ativo: false, id: null, dx: 0, dy: 0 });
+    const j = document.getElementById("joystick");
+    j.classList.add("repouso");  // volta para o canto, visível, como guia para o polegar
+    j.style.left = j.style.top = "";
+    document.querySelector("#joystick span").style.transform = "";
+  }
+  if (e.pointerId === olhar.id) olhar.id = null;
+}
+tela.addEventListener("pointerup", soltar);
+tela.addEventListener("pointercancel", soltar);
+tela.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  jogador.dist = THREE.MathUtils.clamp(jogador.dist + e.deltaY * 0.0025, 1.0, 4.0);
+}, { passive: false });
+
+const btnVisao = document.getElementById("btn-visao");
+const btnTeto = document.getElementById("btn-teto");
+function alternarVisao() {
+  jogador.primeira = !jogador.primeira;
+  btnVisao.setAttribute("aria-pressed", String(jogador.primeira));
+  boneco.visible = !jogador.primeira;
+}
+let tetoVisivel = true;
+function alternarTeto() {
+  tetoVisivel = !tetoVisivel;
+  tetoObjs.forEach((o) => (o.visible = tetoVisivel));
+  btnTeto.setAttribute("aria-pressed", String(tetoVisivel));
+}
+btnVisao.addEventListener("click", alternarVisao);
+btnTeto.addEventListener("click", alternarTeto);
+
+// ---------- modo imersivo: esconde a interface e tenta tela cheia (nem todo celular permite) ----------
+const btnImersivo = document.getElementById("btn-imersivo");
+const btnSair = document.getElementById("btn-sair-imersivo");
+let imersivo = false, emTelaCheia = false;
+async function entrarImersivo() {
+  if (imersivo) return;
+  imersivo = true;
+  document.body.classList.add("imersivo");
+  btnSair.hidden = false;
+  esconderDica();
+  if (document.fullscreenEnabled && !document.fullscreenElement) {
+    try {
+      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+      emTelaCheia = true;
+      await screen.orientation?.lock?.("landscape").catch(() => {});
+    } catch (_) { emTelaCheia = false; }  // sem tela cheia: fica só a interface limpa
+  }
+  tela.focus();
+}
+async function sairImersivo() {
+  if (!imersivo) return;
+  imersivo = false;
+  document.body.classList.remove("imersivo");
+  btnSair.hidden = true;
+  if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch (_) { /* já saiu */ } }
+  emTelaCheia = false;
+}
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && emTelaCheia) sairImersivo();  // Esc ou gesto do sistema saiu da tela cheia
+});
+btnImersivo.addEventListener("click", entrarImersivo);
+btnSair.addEventListener("click", sairImersivo);
+addEventListener("keydown", (e) => {
+  if (e.target.closest && e.target.closest("button")) return;
+  if (e.code === "KeyF") (imersivo ? sairImersivo : entrarImersivo)();
+  if (e.code === "Escape" && imersivo && !document.fullscreenElement) sairImersivo();
+});
+
+// ---------- celular: aviso para girar e dica de primeiro uso ----------
+
+const avisoGirar = document.getElementById("girar");
+let continuarNaVertical = false;
+try { continuarNaVertical = sessionStorage.getItem("passeio-vertical") === "1"; } catch (_) { /* sem armazenamento */ }
+function checarOrientacao() {
+  avisoGirar.hidden = !(toque && innerHeight > innerWidth && !continuarNaVertical);
+}
+document.getElementById("btn-continuar").addEventListener("click", () => {
+  continuarNaVertical = true;
+  try { sessionStorage.setItem("passeio-vertical", "1"); } catch (_) { /* sem armazenamento */ }
+  checarOrientacao();
+});
+addEventListener("orientationchange", () => setTimeout(checarOrientacao, 150));
+checarOrientacao();
+
+const dica = document.getElementById("dica");
+let dicaTimer = 0;
+function esconderDica() {
+  if (dica.hidden || dica.classList.contains("sumindo")) return;
+  dica.classList.add("sumindo");
+  clearTimeout(dicaTimer);
+  setTimeout(() => (dica.hidden = true), 450);
+}
+function prepararToque() {
+  if (!toque) return;
+  const j = document.getElementById("joystick");
+  j.classList.add("repouso");
+  j.hidden = false;
+  dica.hidden = false;
+  dicaTimer = setTimeout(esconderDica, 6000);
+}
+
+// ---------- minimapa ----------
+const mini = document.getElementById("minimapa");
+const mctx = mini.getContext("2d");
+const imgPlanta = new Image();
+imgPlanta.src = "planta.png";
+function desenharMinimapa() {
+  const w = mini.width, h = mini.height;
+  mctx.clearRect(0, 0, w, h);
+  mctx.fillStyle = "#e6e2dc"; mctx.fillRect(0, 0, w, h);
+  if (imgPlanta.complete && imgPlanta.naturalWidth) mctx.drawImage(imgPlanta, 0, 0, w, h);
+  // a planta cobre x de -91,5 a 1028,5 cm e d de -18,5 a 681,5 cm
+  const { x, d } = paraPlanta(jogador.pos);
+  const u = ((x + 91.5) / 1120) * w, v = ((d + 18.5) / 700) * h;
+  const fx = -Math.sin(jogador.yaw), fz = -Math.cos(jogador.yaw);
+  const ang = Math.atan2(fz, fx);
+  mctx.save();
+  mctx.translate(u, v); mctx.rotate(ang);
+  mctx.fillStyle = "rgba(208, 121, 76, 0.25)";
+  mctx.beginPath(); mctx.moveTo(0, 0); mctx.arc(0, 0, 46, -0.55, 0.55); mctx.closePath(); mctx.fill();
+  mctx.fillStyle = "#d0794c"; mctx.strokeStyle = "#fff"; mctx.lineWidth = 2.5;
+  mctx.beginPath(); mctx.moveTo(13, 0); mctx.lineTo(-8, -8); mctx.lineTo(-4, 0); mctx.lineTo(-8, 8); mctx.closePath();
+  mctx.fill(); mctx.stroke();
+  mctx.restore();
+}
+
+// ---------- carregamento do apartamento ----------
+const status = document.getElementById("status");
+const progresso = document.getElementById("progresso");
+// O modelo vem como glTF em texto com os dados binários em base64. A página publicada não deixa buscar
+// URIs "data:", então o binário é decodificado aqui e o GLB é montado em memória para o GLTFLoader.
+async function baixarTexto(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} ao baixar ${url}`);
+  const total = Number(resp.headers.get("content-length")) || 0;
+  if (!resp.body || !total) return resp.text();
+  const leitor = resp.body.getReader(), partes = [];
+  let recebido = 0;
+  for (;;) {
+    const { done, value } = await leitor.read();
+    if (done) break;
+    partes.push(value);
+    recebido += value.length;
+    progresso.style.width = Math.round((recebido / total) * 90) + "%";
+  }
+  return new TextDecoder().decode(await new Blob(partes).arrayBuffer());
+}
+function montarGLB(gltf, bin) {
+  const json = new TextEncoder().encode(JSON.stringify(gltf));
+  const padJ = (4 - (json.length % 4)) % 4, padB = (4 - (bin.length % 4)) % 4;
+  const total = 12 + 8 + json.length + padJ + 8 + bin.length + padB;
+  const buf = new ArrayBuffer(total), dv = new DataView(buf), u8 = new Uint8Array(buf);
+  dv.setUint32(0, 0x46546c67, true); dv.setUint32(4, 2, true); dv.setUint32(8, total, true);
+  dv.setUint32(12, json.length + padJ, true); dv.setUint32(16, 0x4e4f534a, true);
+  u8.set(json, 20); u8.fill(0x20, 20 + json.length, 20 + json.length + padJ);
+  const o = 20 + json.length + padJ;
+  dv.setUint32(o, bin.length + padB, true); dv.setUint32(o + 4, 0x004e4942, true);
+  u8.set(bin, o + 8);
+  return buf;
+}
+async function carregarModelo() {
+  const gltf = JSON.parse(await baixarTexto("apartamento.json"));
+  const uri = gltf.buffers[0].uri;
+  const b64 = uri.slice(uri.indexOf(",") + 1);
+  const bruto = atob(b64), bin = new Uint8Array(bruto.length);
+  for (let i = 0; i < bruto.length; i++) bin[i] = bruto.charCodeAt(i);
+  delete gltf.buffers[0].uri;
+  progresso.style.width = "95%";
+  return new Promise((ok, falha) => new GLTFLoader().parse(montarGLB(gltf, bin), "", ok, falha));
+}
+
+carregarModelo().then((gltf) => {
+  const raiz = gltf.scene;
+  raiz.updateMatrixWorld(true);
+  raiz.traverse((o) => {
+    if (!o.isMesh) return;
+    o.material = material(o.material);
+    if ("envMapIntensity" in o.material) o.material.envMapIntensity = LUZ_AMBIENTE;
+    if (precisaUV(o.material)) uvCaixa(o);
+    const transparente = o.material.transparent;
+    o.castShadow = !transparente;
+    o.receiveShadow = true;
+    const nome = nomeBase(o.name);
+    const caixa = new THREE.Box3().setFromObject(o);
+    if (/^Teto|aro$|difusor$/.test(nome)) {
+      tetoObjs.push(o);
+      if (nome === "Teto") { caixaTeto = caixa; caixas3D.push(caixa); }
+      return;
+    }
+    if (SEM_COLISAO.test(nome)) return;
+    const tam = caixa.getSize(new THREE.Vector3());
+    if (caixa.max.y > 0.1 && caixa.min.y < 1.6 && tam.x * tam.z > 0.0004) {
+      colisores.push({ x0: caixa.min.x, x1: caixa.max.x, z0: caixa.min.z, z1: caixa.max.z });
+    }
+    if (tam.y > 0.5 && !transparente) caixas3D.push(caixa);
+  });
+  scene.add(raiz);
+  document.getElementById("carregando").hidden = true;
+  prepararToque();
+  tela.focus();
+  relogio.start();
+  requestAnimationFrame(quadro);
+}).catch((erro) => {
+  status.textContent = `Não foi possível carregar o apartamento (${erro?.message || erro}). Recarregue a página para tentar de novo.`;
+  console.error(erro);
+});
+
+// ---------- laço principal ----------
+const relogio = new THREE.Clock(false);
+const frente = new THREE.Vector3(), direita = new THREE.Vector3(), mov = new THREE.Vector3();
+const comodoEl = document.getElementById("comodo");
+let ultimoComodo = "";
+function quadro() {
+  const dt = Math.min(relogio.getDelta(), 0.05);
+  const { yaw } = jogador;
+  frente.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  direita.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  let fz = 0, fx = 0;
+  if (teclas.has("KeyW") || teclas.has("ArrowUp")) fz += 1;
+  if (teclas.has("KeyS") || teclas.has("ArrowDown")) fz -= 1;
+  if (teclas.has("KeyD") || teclas.has("ArrowRight")) fx += 1;
+  if (teclas.has("KeyA") || teclas.has("ArrowLeft")) fx -= 1;
+  if (joy.ativo) { fx += joy.dx; fz -= joy.dy; }
+  mov.set(0, 0, 0).addScaledVector(frente, fz).addScaledVector(direita, fx);
+  const intensidade = Math.min(1, mov.length());
+  const correndo = teclas.has("ShiftLeft") || teclas.has("ShiftRight") || (joy.ativo && Math.hypot(joy.dx, joy.dy) > 0.95);
+  const alvoVel = intensidade * (correndo ? 2.8 : 1.4);
+  jogador.vel += (alvoVel - jogador.vel) * Math.min(1, dt * 10);
+  if (intensidade > 0.01) {
+    mov.normalize();
+    jogador.pos.addScaledVector(mov, jogador.vel * dt);
+    const alvoRot = Math.atan2(mov.x, mov.z);
+    let delta = alvoRot - boneco.rotation.y;
+    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+    boneco.rotation.y += delta * Math.min(1, dt * 12);
+  }
+  resolverColisao(jogador.pos);
+  boneco.position.copy(jogador.pos);
+
+  // caminhada
+  const ud = boneco.userData;
+  jogador.fase += dt * jogador.vel * 5.2;
+  const amp = Math.min(1, jogador.vel / 1.4) * 0.55;
+  ud.pernaE.rotation.x = Math.sin(jogador.fase) * amp;
+  ud.pernaD.rotation.x = -Math.sin(jogador.fase) * amp;
+  ud.bracoE.rotation.x = -Math.sin(jogador.fase) * amp * 0.8;
+  ud.bracoD.rotation.x = Math.sin(jogador.fase) * amp * 0.8;
+  boneco.position.y = Math.abs(Math.sin(jogador.fase)) * 0.03 * Math.min(1, jogador.vel);
+
+  // câmera
+  if (jogador.primeira) {
+    camera.position.copy(jogador.pos).setY(OLHOS);
+    camera.rotation.set(jogador.pitchFP, yaw, 0, "YXZ");
+  } else {
+    const pivo = jogador.pos.clone().setY(ALTURA - 0.25);
+    const c = Math.cos(jogador.pitch);
+    const desejo = pivo.clone().add(new THREE.Vector3(Math.sin(yaw) * c, Math.sin(jogador.pitch), Math.cos(yaw) * c).multiplyScalar(jogador.dist));
+    const d = distanciaLivre(pivo, desejo);
+    camera.position.copy(pivo).add(desejo.sub(pivo).normalize().multiplyScalar(d));
+    camera.lookAt(pivo);
+  }
+
+  const nome = nomeDoComodo(paraPlanta(jogador.pos));
+  if (nome !== ultimoComodo) { comodoEl.textContent = nome; ultimoComodo = nome; }
+  desenharMinimapa();
+  renderer.render(scene, camera);
+  requestAnimationFrame(quadro);
+}
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  checarOrientacao();
+});
+</script>

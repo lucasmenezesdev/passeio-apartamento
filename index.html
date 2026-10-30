@@ -177,6 +177,58 @@
   }
   #btn-sair-imersivo:hover, #btn-sair-imersivo:focus-visible { opacity: 1; }
 
+  #companhia { font-size: 12px; color: var(--acento-forte); font-weight: 600; }
+  #sala {
+    position: fixed;
+    inset: 0;
+    z-index: 17;
+    display: grid;
+    place-items: center;
+    background: rgba(20, 19, 18, 0.72);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  #sala .caixa {
+    display: grid;
+    gap: 10px;
+    padding: 16px 18px;
+    width: min(360px, 100%);
+    max-height: calc(100% - 24px);
+    overflow-y: auto;
+    background: var(--painel-forte);
+    margin: 0;
+  }
+  #sala h2 { margin: 0; font-family: var(--fonte-titulo); font-size: 17px; font-weight: 600; }
+  #sala p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--texto-suave); }
+  #sala-campos { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; }
+  #sala-campos label { font-size: 13px; color: var(--texto-suave); }
+  #sala input {
+    font: inherit;
+    font-size: 15px;
+    color: var(--texto);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--borda);
+    border-radius: 8px;
+    padding: 7px 10px;
+    min-width: 0;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  #sala input:focus-visible { outline: 2px solid var(--acento-forte); outline-offset: 1px; }
+  #sala-endereco {
+    color: var(--texto) !important;
+    font-weight: 600;
+    word-break: break-all;
+    user-select: text;
+    -webkit-user-select: text;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  #sala-erro { color: #f0a080 !important; }
+  .sala-acoes { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  button.acao.primario { background: var(--acento); border-color: var(--acento); color: #1b120d; }
+
   #telacheia {
     position: fixed;
     inset: 0;
@@ -284,6 +336,7 @@
 <div id="topo" class="painel" aria-live="polite">
   <span class="rotulo">Você está em</span>
   <span id="comodo">Entrada</span>
+  <span id="companhia" hidden></span>
 </div>
 
 <div id="mapa" class="painel"><canvas id="minimapa" width="480" height="300" aria-label="Minimapa da planta com a sua posição"></canvas></div>
@@ -299,6 +352,26 @@
   <button id="btn-visao" class="acao" type="button" aria-pressed="false">1ª pessoa</button>
   <button id="btn-teto" class="acao" type="button" aria-pressed="true">Teto</button>
   <button id="btn-imersivo" class="acao" type="button">Modo imersivo</button>
+  <button id="btn-dois" class="acao" type="button" hidden>Passeio a dois</button>
+</div>
+
+<div id="sala" hidden role="dialog" aria-modal="true" aria-labelledby="sala-titulo">
+  <form id="sala-form" class="caixa painel" novalidate>
+    <h2 id="sala-titulo">Passeio a dois</h2>
+    <p id="sala-texto"></p>
+    <div id="sala-campos">
+      <label for="sala-nome">Seu nome</label>
+      <input id="sala-nome" type="text" maxlength="20" autocomplete="given-name" required>
+      <label for="sala-altura">Sua altura (m)</label>
+      <input id="sala-altura" type="text" inputmode="decimal" autocomplete="off" placeholder="1,60" required>
+    </div>
+    <p id="sala-endereco" hidden></p>
+    <p id="sala-erro" hidden></p>
+    <div class="sala-acoes">
+      <button id="sala-fechar" class="acao" type="button">Fechar</button>
+      <button id="sala-principal" class="acao primario" type="submit">Criar sala</button>
+    </div>
+  </form>
 </div>
 <button id="btn-sair-imersivo" class="acao" type="button" aria-label="Sair do modo imersivo" hidden>Sair</button>
 
@@ -368,8 +441,9 @@ const toque = matchMedia("(pointer: coarse)").matches;
 // ---------- ajustes de luz e do boneco ----------
 const EXPOSICAO = 0.9;
 const LUZ_AMBIENTE = 0.45;   // reflexo do ambiente nos materiais (1 = padrão, estourava)
-const ALTURA = 1.60;         // altura do boneco em metros
-const OLHOS = ALTURA - 0.10; // visão em 1ª pessoa
+let ALTURA = 1.60;           // altura do boneco em metros (cada um ajusta a sua no passeio a dois)
+const ALTURA_MODELO = 1.75;  // o boneco foi desenhado com 1,75 m (até o topo do cabelo)
+const COR_ANFITRIAO = 0xd0794c, COR_CONVIDADO = 0x3f8f8a;
 
 // ---------- renderer e cena ----------
 const container = document.getElementById("cena");
@@ -636,10 +710,10 @@ let caixaTeto = null;
 const SEM_COLISAO = /^(Piso|Laje|Tapete|Cortina|Pendente|Quadro|Fita LED|LED|Spot)/;
 
 // ---------- boneco ----------
-function criarBoneco() {
+function criarBoneco(corCamisa = COR_ANFITRIAO) {
   const grupo = new THREE.Group();
   const pele = new THREE.MeshStandardMaterial({ color: 0xc89c7c, roughness: 0.6 });
-  const camisa = new THREE.MeshStandardMaterial({ color: 0xd0794c, roughness: 0.8 });
+  const camisa = new THREE.MeshStandardMaterial({ color: corCamisa, roughness: 0.8 });
   const calca = new THREE.MeshStandardMaterial({ color: 0x2f3440, roughness: 0.85 });
   const tenis = new THREE.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.6 });
   const cabelo = new THREE.MeshStandardMaterial({ color: 0x2a211b, roughness: 0.9 });
@@ -675,11 +749,19 @@ function criarBoneco() {
   const bracoD = membro(0.05, 0.5, camisa, 0.24, 1.43, false);
   const maoE = parte(new THREE.SphereGeometry(0.05, 12, 10), pele); maoE.position.y = -0.62; bracoE.add(maoE);
   const maoD = parte(new THREE.SphereGeometry(0.05, 12, 10), pele); maoD.position.y = -0.62; bracoD.add(maoD);
-  grupo.userData = { pernaE, pernaD, bracoE, bracoD, tronco };
+  grupo.userData = { pernaE, pernaD, bracoE, bracoD, tronco, camisa };
   return grupo;
 }
+function animarCaminhada(b, fase, vel) {
+  const ud = b.userData, amp = Math.min(1, vel / 1.4) * 0.55;
+  ud.pernaE.rotation.x = Math.sin(fase) * amp;
+  ud.pernaD.rotation.x = -Math.sin(fase) * amp;
+  ud.bracoE.rotation.x = -Math.sin(fase) * amp * 0.8;
+  ud.bracoD.rotation.x = Math.sin(fase) * amp * 0.8;
+  b.position.y = Math.abs(Math.sin(fase)) * 0.03 * Math.min(1, vel);
+}
 const boneco = criarBoneco();
-boneco.scale.setScalar(ALTURA / 1.75);  // o modelo foi desenhado com 1,75 m (até o topo do cabelo)
+boneco.scale.setScalar(ALTURA / ALTURA_MODELO);
 scene.add(boneco);
 
 // ---------- estado do jogador ----------
@@ -730,7 +812,7 @@ function distanciaLivre(origem, destino) {
 // ---------- entrada ----------
 const tela = renderer.domElement;
 addEventListener("keydown", (e) => {
-  if (e.target.closest && e.target.closest("button")) return;
+  if (e.target.closest && e.target.closest("button, input")) return;
   teclas.add(e.code);
   if (e.code === "KeyV") alternarVisao();
   if (e.code === "KeyT") alternarTeto();
@@ -882,10 +964,272 @@ document.addEventListener("fullscreenchange", () => {
 btnImersivo.addEventListener("click", entrarImersivo);
 btnSair.addEventListener("click", sairImersivo);
 addEventListener("keydown", (e) => {
-  if (e.target.closest && e.target.closest("button")) return;
+  if (e.target.closest && e.target.closest("button, input")) return;
   if (e.code === "KeyF") (imersivo ? sairImersivo : entrarImersivo)();
   if (e.code === "Escape" && !avisoTela.hidden) { avisoTela.hidden = true; return; }
   if (e.code === "Escape" && imersivo && !document.fullscreenElement) sairImersivo();
+});
+
+// ---------- passeio a dois: um hospeda a sala, o outro entra pelo link (conexão direta WebRTC via PeerJS) ----------
+// Só funciona no site próprio: dentro do Claude o visualizador bloqueia conexões diretas.
+const PEERJS_URL = "https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js";
+const PREFIXO_SALA = "apto3d-lucas-";
+const podeDupla = !emMoldura && "RTCPeerConnection" in window;
+const dupla = { peer: null, conn: null, papel: null, codigo: null, outro: null, ultimoEnvio: 0, nome: "", altura: ALTURA };
+const salaEl = document.getElementById("sala");
+const $sala = (id) => document.getElementById("sala-" + id);
+const companhia = document.getElementById("companhia");
+const btnDois = document.getElementById("btn-dois");
+btnDois.hidden = !podeDupla;
+let modoSala = "criar";
+
+function lerPreferencias() {
+  try {
+    dupla.nome = localStorage.getItem("passeio-nome") || dupla.nome;
+    dupla.altura = parseFloat(localStorage.getItem("passeio-altura")) || dupla.altura;
+  } catch (_) { /* sem armazenamento */ }
+}
+function salvarPreferencias() {
+  try { localStorage.setItem("passeio-nome", dupla.nome); localStorage.setItem("passeio-altura", String(dupla.altura)); }
+  catch (_) { /* sem armazenamento */ }
+}
+const linkSala = () => `${location.origin}${location.pathname}#sala-${dupla.codigo}`;
+const textoCompartilhar = () => (navigator.share ? "Compartilhar link" : "Copiar link");
+
+function mostrarSala(modo, erro = "") {
+  modoSala = modo;
+  const textos = {
+    criar: ["Passeio a dois", "Você hospeda a sala e manda o link para a outra pessoa. Os dois precisam estar com o passeio aberto.", "Criar sala"],
+    aberta: ["Sala aberta", "Mande este link para a outra pessoa e deixe o passeio aberto enquanto ela entra.", textoCompartilhar()],
+    entrar: ["Entrar no passeio", "Você foi convidado para andar junto pelo apartamento.", "Entrar"],
+    conectando: ["Conectando…", "Abrindo a conexão direta entre os dois aparelhos.", "Aguarde"],
+  }[modo];
+  $sala("titulo").textContent = textos[0];
+  $sala("texto").textContent = textos[1];
+  $sala("principal").textContent = textos[2];
+  $sala("principal").disabled = modo === "conectando";
+  const comCampos = modo === "criar" || modo === "entrar";
+  $sala("campos").hidden = !comCampos;
+  $sala("endereco").hidden = modo !== "aberta";
+  if (modo === "aberta") $sala("endereco").textContent = linkSala();
+  $sala("erro").hidden = !erro;
+  $sala("erro").textContent = erro;
+  if (comCampos) {
+    $sala("nome").value = dupla.nome;
+    $sala("altura").value = String(dupla.altura.toFixed(2)).replace(".", ",");
+  }
+  salaEl.hidden = false;
+  (comCampos ? $sala("nome") : $sala("principal")).focus();
+}
+function fecharSala() { salaEl.hidden = true; tela.focus(); }
+function atualizarCompanhia(texto) { companhia.textContent = texto; companhia.hidden = !texto; }
+function aplicarMinhaAltura(m) { ALTURA = m; boneco.scale.setScalar(m / ALTURA_MODELO); }
+const corDaCamisa = (b) => b.userData.camisa.color.getHex();
+
+let carregandoPeer = null;
+function carregarPeerJS() {
+  if (window.Peer) return Promise.resolve();
+  carregandoPeer ??= new Promise((ok, falha) => {
+    const s = document.createElement("script");
+    s.src = PEERJS_URL;
+    s.onload = ok;
+    s.onerror = () => { carregandoPeer = null; falha(new Error("biblioteca de conexão")); };
+    document.head.appendChild(s);
+  });
+  return carregandoPeer;
+}
+function gerarCodigo() {
+  const letras = "abcdefghjkmnpqrstuvwxyz23456789", n = new Uint8Array(6);
+  crypto.getRandomValues(n);
+  return Array.from(n, (v) => letras[v % letras.length]).join("");
+}
+
+function criarEtiqueta(texto) {
+  const c = document.createElement("canvas");
+  c.width = 512; c.height = 128;
+  const g = c.getContext("2d");
+  g.font = "600 54px Figtree, 'Segoe UI', sans-serif";
+  const w = Math.min(500, g.measureText(texto).width + 52);
+  g.fillStyle = "rgba(22, 20, 18, 0.8)";
+  if (g.roundRect) { g.beginPath(); g.roundRect(256 - w / 2, 22, w, 84, 42); g.fill(); } else g.fillRect(256 - w / 2, 22, w, 84);
+  g.fillStyle = "#f3eee7"; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(texto, 256, 66);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
+  s.scale.set(0.8, 0.2, 1);
+  s.renderOrder = 10;
+  return s;
+}
+function removerOutro() {
+  if (!dupla.outro) return;
+  scene.remove(dupla.outro.boneco);
+  dupla.outro = null;
+}
+function criarOutro(nome, altura, cor) {
+  removerOutro();
+  const b = criarBoneco(cor);
+  b.scale.setScalar(altura / ALTURA_MODELO);
+  const etiqueta = criarEtiqueta(nome);
+  etiqueta.position.y = ALTURA_MODELO + 0.3;
+  b.add(etiqueta);
+  b.position.copy(jogador.pos);
+  scene.add(b);
+  dupla.outro = { boneco: b, alvo: b.position.clone(), rotAlvo: 0, vel: 0, fase: 0, nome, cor };
+}
+function sairOutro() {
+  const nome = dupla.outro?.nome || "A outra pessoa";
+  removerOutro();
+  dupla.conn = null;
+  atualizarCompanhia(dupla.papel === "anfitriao" && dupla.peer && !dupla.peer.destroyed ? `${nome} saiu · sala aberta` : `${nome} saiu`);
+}
+function encerrarDupla() {
+  removerOutro();
+  try { dupla.conn?.close(); } catch (_) { /* já fechada */ }
+  try { dupla.peer?.destroy(); } catch (_) { /* já fechado */ }
+  dupla.conn = null; dupla.peer = null;
+}
+function receber(m) {
+  if (!m || typeof m !== "object") return;
+  if (m.t === "ola") {
+    const nome = String(m.nome || "Visitante").slice(0, 20);
+    criarOutro(nome, THREE.MathUtils.clamp(+m.altura || 1.6, 1.2, 2.1), +m.cor || COR_CONVIDADO);
+    atualizarCompanhia(`Com ${nome}`);
+  } else if (m.t === "p" && dupla.outro) {
+    dupla.outro.alvo.set(+m.x || 0, 0, +m.z || 0);
+    dupla.outro.rotAlvo = +m.r || 0;
+    dupla.outro.vel = +m.v || 0;
+  } else if (m.t === "cheia") {
+    mostrarSala("entrar", "Essa sala já tem duas pessoas.");
+  } else if (m.t === "tchau") {
+    sairOutro();
+  }
+}
+function ligarConexao(c) {
+  dupla.conn = c;
+  c.on("open", () => {
+    c.send({ t: "ola", nome: dupla.nome, altura: dupla.altura, cor: corDaCamisa(boneco) });
+    fecharSala();
+  });
+  c.on("data", receber);
+  c.on("close", () => { if (dupla.conn === c) sairOutro(); });
+  c.on("error", () => { if (dupla.conn === c) sairOutro(); });
+}
+
+async function criarSala() {
+  mostrarSala("conectando");
+  try { await carregarPeerJS(); } catch (_) { return mostrarSala("criar", "Não deu para abrir a sala sem internet. Tente de novo."); }
+  encerrarDupla();
+  dupla.papel = "anfitriao";
+  dupla.codigo = gerarCodigo();
+  boneco.userData.camisa.color.setHex(COR_ANFITRIAO);
+  const peer = new window.Peer(PREFIXO_SALA + dupla.codigo);
+  dupla.peer = peer;
+  peer.on("open", () => { mostrarSala("aberta"); atualizarCompanhia("Sala aberta · esperando"); });
+  peer.on("connection", (c) => {
+    if (dupla.conn && dupla.conn.open) { // já tem alguém: avisa e recusa
+      c.on("open", () => { c.send({ t: "cheia" }); setTimeout(() => c.close(), 300); });
+      return;
+    }
+    ligarConexao(c);
+  });
+  peer.on("disconnected", () => { try { peer.reconnect(); } catch (_) { /* fica sem servidor de encontro */ } });
+  peer.on("error", (e) => {
+    if (dupla.peer !== peer) return;
+    if (e.type === "unavailable-id") return criarSala();
+    if (dupla.conn && dupla.conn.open) return;  // já conectados: erros do servidor de encontro não importam
+    mostrarSala("criar", `Não deu para abrir a sala (${e.type || e.message}). Tente de novo.`);
+  });
+}
+async function entrarSala() {
+  mostrarSala("conectando");
+  try { await carregarPeerJS(); } catch (_) { return mostrarSala("entrar", "Não deu para conectar sem internet. Tente de novo."); }
+  encerrarDupla();
+  dupla.papel = "convidado";
+  boneco.userData.camisa.color.setHex(COR_CONVIDADO);
+  jogador.pos.copy(paraMundo(250, 215));
+  const peer = new window.Peer();
+  dupla.peer = peer;
+  peer.on("open", () => ligarConexao(peer.connect(PREFIXO_SALA + dupla.codigo, { reliable: true })));
+  peer.on("error", (e) => {
+    if (dupla.peer !== peer || (dupla.conn && dupla.conn.open)) return;
+    mostrarSala("entrar", e.type === "peer-unavailable"
+      ? "A sala não está aberta. Peça para a outra pessoa abrir o passeio e criar a sala de novo."
+      : `Não deu para conectar (${e.type || e.message}). Se estiver no 4G, tente no Wi-Fi.`);
+  });
+  setTimeout(() => {
+    if (dupla.peer === peer && !(dupla.conn && dupla.conn.open) && modoSala === "conectando") {
+      mostrarSala("entrar", "A conexão demorou demais. Se estiver no 4G, tente no Wi-Fi.");
+    }
+  }, 15000);
+}
+async function compartilharLink() {
+  const url = linkSala();
+  if (navigator.share) {
+    try { await navigator.share({ title: "Passeio pelo apartamento", text: "Entra no passeio comigo:", url }); return; }
+    catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    $sala("principal").textContent = "Link copiado";
+    setTimeout(() => { if (modoSala === "aberta") $sala("principal").textContent = textoCompartilhar(); }, 2000);
+  } catch (_) { // sem área de transferência: seleciona o endereço para copiar à mão
+    const r = document.createRange();
+    r.selectNodeContents($sala("endereco"));
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  }
+}
+
+$sala("form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (modoSala === "aberta") return compartilharLink();
+  if (modoSala !== "criar" && modoSala !== "entrar") return;
+  const nome = $sala("nome").value.trim();
+  const altura = parseFloat($sala("altura").value.replace(",", "."));
+  if (!nome) return mostrarSala(modoSala, "Escreva seu nome.");
+  if (!(altura >= 1.2 && altura <= 2.1)) return mostrarSala(modoSala, "Coloque a altura em metros, por exemplo 1,60.");
+  dupla.nome = nome; dupla.altura = altura;
+  salvarPreferencias();
+  aplicarMinhaAltura(altura);
+  (modoSala === "criar" ? criarSala : entrarSala)();
+});
+$sala("fechar").addEventListener("click", fecharSala);
+btnDois.addEventListener("click", () => {
+  lerPreferencias();
+  if (dupla.papel === "anfitriao" && dupla.peer && !dupla.peer.destroyed) mostrarSala("aberta");
+  else mostrarSala("criar");
+});
+function abrirConviteDoLink() {
+  const m = location.hash.match(/^#sala-([a-z0-9]{4,12})$/);
+  if (!m || !podeDupla) return;
+  dupla.codigo = m[1];
+  lerPreferencias();
+  mostrarSala("entrar");
+}
+function atualizarDupla(dt) {
+  const o = dupla.outro;
+  if (o) {
+    const b = o.boneco, k = Math.min(1, dt * 10);
+    b.position.x += (o.alvo.x - b.position.x) * k;
+    b.position.z += (o.alvo.z - b.position.z) * k;
+    let delta = o.rotAlvo - b.rotation.y;
+    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+    b.rotation.y += delta * k;
+    o.fase += dt * o.vel * 5.2;
+    animarCaminhada(b, o.fase, o.vel);
+  }
+  const agora = performance.now();
+  if (dupla.conn && dupla.conn.open && agora - dupla.ultimoEnvio > 66) {  // ~15 vezes por segundo
+    dupla.ultimoEnvio = agora;
+    try {
+      dupla.conn.send({ t: "p", x: +jogador.pos.x.toFixed(3), z: +jogador.pos.z.toFixed(3),
+                        r: +boneco.rotation.y.toFixed(3), v: +jogador.vel.toFixed(2) });
+    } catch (_) { /* conexão caindo */ }
+  }
+}
+addEventListener("pagehide", () => {
+  try { dupla.conn?.open && dupla.conn.send({ t: "tchau" }); } catch (_) { /* saindo */ }
+  try { dupla.peer?.destroy(); } catch (_) { /* saindo */ }
 });
 
 // ---------- celular: aviso para girar e dica de primeiro uso ----------
@@ -932,15 +1276,22 @@ function desenharMinimapa() {
   mctx.fillStyle = "#e6e2dc"; mctx.fillRect(0, 0, w, h);
   if (imgPlanta.complete && imgPlanta.naturalWidth) mctx.drawImage(imgPlanta, 0, 0, w, h);
   // a planta cobre x de -91,5 a 1028,5 cm e d de -18,5 a 681,5 cm
-  const { x, d } = paraPlanta(jogador.pos);
-  const u = ((x + 91.5) / 1120) * w, v = ((d + 18.5) / 700) * h;
+  const noMapa = (pos) => { const { x, d } = paraPlanta(pos); return [((x + 91.5) / 1120) * w, ((d + 18.5) / 700) * h]; };
+  if (dupla.outro) { // a outra pessoa: ponto com a cor da camisa dela
+    const [u2, v2] = noMapa(dupla.outro.boneco.position);
+    mctx.fillStyle = "#" + dupla.outro.cor.toString(16).padStart(6, "0");
+    mctx.strokeStyle = "#fff"; mctx.lineWidth = 2.5;
+    mctx.beginPath(); mctx.arc(u2, v2, 8, 0, Math.PI * 2); mctx.fill(); mctx.stroke();
+  }
+  const [u, v] = noMapa(jogador.pos);
   const fx = -Math.sin(jogador.yaw), fz = -Math.cos(jogador.yaw);
   const ang = Math.atan2(fz, fx);
+  const minhaCor = "#" + boneco.userData.camisa.color.getHexString();
   mctx.save();
   mctx.translate(u, v); mctx.rotate(ang);
-  mctx.fillStyle = "rgba(208, 121, 76, 0.25)";
+  mctx.globalAlpha = 0.25; mctx.fillStyle = minhaCor;
   mctx.beginPath(); mctx.moveTo(0, 0); mctx.arc(0, 0, 46, -0.55, 0.55); mctx.closePath(); mctx.fill();
-  mctx.fillStyle = "#d0794c"; mctx.strokeStyle = "#fff"; mctx.lineWidth = 2.5;
+  mctx.globalAlpha = 1; mctx.strokeStyle = "#fff"; mctx.lineWidth = 2.5;
   mctx.beginPath(); mctx.moveTo(13, 0); mctx.lineTo(-8, -8); mctx.lineTo(-4, 0); mctx.lineTo(-8, 8); mctx.closePath();
   mctx.fill(); mctx.stroke();
   mctx.restore();
@@ -1019,6 +1370,7 @@ carregarModelo().then((gltf) => {
   scene.add(raiz);
   document.getElementById("carregando").hidden = true;
   prepararToque();
+  abrirConviteDoLink();
   tela.focus();
   relogio.start();
   requestAnimationFrame(quadro);
@@ -1060,18 +1412,13 @@ function quadro() {
   boneco.position.copy(jogador.pos);
 
   // caminhada
-  const ud = boneco.userData;
   jogador.fase += dt * jogador.vel * 5.2;
-  const amp = Math.min(1, jogador.vel / 1.4) * 0.55;
-  ud.pernaE.rotation.x = Math.sin(jogador.fase) * amp;
-  ud.pernaD.rotation.x = -Math.sin(jogador.fase) * amp;
-  ud.bracoE.rotation.x = -Math.sin(jogador.fase) * amp * 0.8;
-  ud.bracoD.rotation.x = Math.sin(jogador.fase) * amp * 0.8;
-  boneco.position.y = Math.abs(Math.sin(jogador.fase)) * 0.03 * Math.min(1, jogador.vel);
+  animarCaminhada(boneco, jogador.fase, jogador.vel);
+  atualizarDupla(dt);
 
   // câmera
   if (jogador.primeira) {
-    camera.position.copy(jogador.pos).setY(OLHOS);
+    camera.position.copy(jogador.pos).setY(ALTURA - 0.10);
     camera.rotation.set(jogador.pitchFP, yaw, 0, "YXZ");
   } else {
     const pivo = jogador.pos.clone().setY(ALTURA - 0.25);

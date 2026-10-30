@@ -177,6 +177,27 @@
   }
   #btn-sair-imersivo:hover, #btn-sair-imersivo:focus-visible { opacity: 1; }
 
+  #telacheia {
+    position: fixed;
+    inset: 0;
+    z-index: 16;
+    display: grid;
+    place-items: center;
+    background: rgba(20, 19, 18, 0.72);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  #telacheia .caixa { display: grid; gap: 12px; padding: 18px 20px; max-width: 360px; background: var(--painel-forte); }
+  #telacheia h2 { margin: 0; font-family: var(--fonte-titulo); font-size: 17px; font-weight: 600; }
+  #tc-corpo { font-size: 14px; line-height: 1.55; color: var(--texto-suave); display: grid; gap: 8px; }
+  #tc-corpo p, #tc-corpo ol { margin: 0; }
+  #tc-corpo ol { padding-left: 20px; display: grid; gap: 6px; }
+  #tc-corpo b { color: var(--texto); }
+  #tc-corpo svg { width: 16px; height: 16px; vertical-align: -3px; stroke: var(--acento-forte); }
+  #tc-corpo .endereco { color: var(--texto); font-weight: 600; user-select: text; -webkit-user-select: text; word-break: break-all; }
+  #tc-corpo a.acao { justify-self: start; text-decoration: none; }
+  #tc-ok { justify-self: end; }
+
   #joystick.repouso {
     left: calc(28px + env(safe-area-inset-left, 0px));
     top: auto;
@@ -283,6 +304,14 @@
 
 <div id="joystick" hidden><span></span></div>
 <div id="dica" class="painel" hidden>Arraste do lado <b>esquerdo</b> para andar<br>e do lado <b>direito</b> para olhar</div>
+
+<div id="telacheia" hidden role="dialog" aria-modal="true" aria-labelledby="tc-titulo">
+  <div class="caixa painel">
+    <h2 id="tc-titulo"></h2>
+    <div id="tc-corpo"></div>
+    <button id="tc-ok" class="acao" type="button">Entendi</button>
+  </div>
+</div>
 
 <div id="girar" hidden>
   <div class="caixa">
@@ -785,20 +814,59 @@ btnTeto.addEventListener("click", alternarTeto);
 const btnImersivo = document.getElementById("btn-imersivo");
 const btnSair = document.getElementById("btn-sair-imersivo");
 let imersivo = false, emTelaCheia = false;
+
+// Onde a tela cheia não existe, o modo imersivo explica o caminho que funciona.
+const SITE = "https://lucasmenezesdev.github.io/passeio-apartamento/";
+const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ||
+            location.hash === "#teste-iphone";  // #teste-iphone simula o iPhone para testar a explicação
+const comoApp = matchMedia("(display-mode: standalone)").matches || matchMedia("(display-mode: fullscreen)").matches ||
+                navigator.standalone === true;
+const emMoldura = (() => { try { return window.self !== window.top; } catch (_) { return true; } })();
+const ICONE_COMPARTILHAR = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11v9h12v-9"/></svg>';
+const avisoTela = document.getElementById("telacheia");
+function explicarTelaCheia() {
+  if (comoApp) return;  // instalado na tela inicial: já está sem barras
+  let titulo, corpo;
+  if (emMoldura) {
+    titulo = "Tela cheia de verdade";
+    corpo = `<p>Aqui dentro do Claude a barra de cima não some. Para usar a tela inteira, abra o passeio pelo site:</p>
+             <p class="endereco">${SITE.replace("https://", "")}</p>
+             <a class="acao" href="${SITE}" target="_blank" rel="noopener">Abrir o site</a>
+             ${iOS ? "<p>No iPhone, depois de abrir o site, adicione à Tela de Início para tirar também a barra do navegador.</p>" : ""}`;
+  } else if (iOS) {
+    titulo = "Tela cheia no iPhone";
+    corpo = `<p>O iPhone não deixa sites esconderem a barra do navegador. Instalando, o passeio abre como app, sem barras:</p>
+             <ol>
+               <li>Toque em <b>Compartilhar</b> ${ICONE_COMPARTILHAR} (no Safari, na barra; no Chrome, ao lado do endereço).</li>
+               <li>Escolha <b>Adicionar à Tela de Início</b>.</li>
+               <li>Abra pelo ícone <b>Apartamento</b> na tela inicial.</li>
+             </ol>`;
+  } else {
+    return;
+  }
+  document.getElementById("tc-titulo").textContent = titulo;
+  document.getElementById("tc-corpo").innerHTML = corpo;
+  avisoTela.hidden = false;
+  document.getElementById("tc-ok").focus();
+}
+document.getElementById("tc-ok").addEventListener("click", () => { avisoTela.hidden = true; tela.focus(); });
+
 async function entrarImersivo() {
   if (imersivo) return;
   imersivo = true;
   document.body.classList.add("imersivo");
   btnSair.hidden = false;
   esconderDica();
-  if (document.fullscreenEnabled && !document.fullscreenElement) {
-    try {
-      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
-      emTelaCheia = true;
-      await screen.orientation?.lock?.("landscape").catch(() => {});
-    } catch (_) { emTelaCheia = false; }  // sem tela cheia: fica só a interface limpa
+  if (document.fullscreenEnabled && !document.fullscreenElement && !comoApp) {
+    document.documentElement.requestFullscreen({ navigationUI: "hide" })
+      .then(() => { emTelaCheia = true; return screen.orientation?.lock?.("landscape"); })
+      .catch(() => {});
+    // alguns navegadores recusam em silêncio: se não entrou em tela cheia, explica o caminho
+    setTimeout(() => { if (imersivo && !document.fullscreenElement) explicarTelaCheia(); }, 700);
+  } else if (!document.fullscreenElement) {
+    explicarTelaCheia();
   }
-  tela.focus();
+  if (avisoTela.hidden) tela.focus();
 }
 async function sairImersivo() {
   if (!imersivo) return;
@@ -816,6 +884,7 @@ btnSair.addEventListener("click", sairImersivo);
 addEventListener("keydown", (e) => {
   if (e.target.closest && e.target.closest("button")) return;
   if (e.code === "KeyF") (imersivo ? sairImersivo : entrarImersivo)();
+  if (e.code === "Escape" && !avisoTela.hidden) { avisoTela.hidden = true; return; }
   if (e.code === "Escape" && imersivo && !document.fullscreenElement) sairImersivo();
 });
 

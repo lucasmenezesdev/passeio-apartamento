@@ -201,7 +201,26 @@
   #sala h2 { margin: 0; font-family: var(--fonte-titulo); font-size: 17px; font-weight: 600; }
   #sala p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--texto-suave); }
   #sala-campos { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; }
-  #sala-campos label { font-size: 13px; color: var(--texto-suave); }
+  #sala-campos label, #sala-campos > span { font-size: 13px; color: var(--texto-suave); }
+  .escolha-personagem { display: flex; gap: 6px; }
+  #sala-campos .escolha-personagem label {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font-size: 14px;
+    color: var(--texto);
+    padding: 7px 10px;
+    border: 1px solid var(--borda);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+  }
+  .escolha-personagem input { position: absolute; opacity: 0; pointer-events: none; }
+  .escolha-personagem i { width: 10px; height: 10px; border-radius: 50%; }
+  #sala-campos .escolha-personagem label:has(input:checked) { border-color: var(--acento-forte); background: rgba(255, 255, 255, 0.14); }
+  .escolha-personagem label:has(input:focus-visible) { outline: 2px solid var(--acento-forte); outline-offset: 1px; }
   #sala input {
     font: inherit;
     font-size: 15px;
@@ -344,13 +363,13 @@
 <div id="ajuda" class="painel">
   <b>Andar</b> <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> ou setas · <kbd>Shift</kbd> corre<br>
   <b>Olhar</b> arraste o mouse (ou clique para travar o cursor, <kbd>Esc</kbd> solta)<br>
-  <b>Câmera</b> roda do mouse aproxima · <kbd>V</kbd> 1ª/3ª pessoa · <kbd>T</kbd> teto<br>
+  <b>Vista</b> <kbd>T</kbd> teto · <kbd>N</kbd> noite<br>
   <b>Modo imersivo</b> <kbd>F</kbd> entra e sai
 </div>
 
 <div id="botoes">
-  <button id="btn-visao" class="acao" type="button" aria-pressed="false">1ª pessoa</button>
   <button id="btn-teto" class="acao" type="button" aria-pressed="true">Teto</button>
+  <button id="btn-noite" class="acao" type="button" aria-pressed="false">Noite</button>
   <button id="btn-imersivo" class="acao" type="button">Modo imersivo</button>
   <button id="btn-dois" class="acao" type="button" hidden>Passeio a dois</button>
 </div>
@@ -364,6 +383,11 @@
       <input id="sala-nome" type="text" maxlength="20" autocomplete="given-name" required>
       <label for="sala-altura">Sua altura (m)</label>
       <input id="sala-altura" type="text" inputmode="decimal" autocomplete="off" placeholder="1,60" required>
+      <span id="sala-personagem-rotulo">Personagem</span>
+      <div class="escolha-personagem" role="radiogroup" aria-labelledby="sala-personagem-rotulo">
+        <label><input type="radio" name="personagem" value="lucas"><i style="background:#d0794c"></i>Lucas</label>
+        <label><input type="radio" name="personagem" value="millena"><i style="background:#3f8f8a"></i>Millena</label>
+      </div>
     </div>
     <p id="sala-endereco" hidden></p>
     <p id="sala-erro" hidden></p>
@@ -444,7 +468,12 @@ const LUZ_AMBIENTE = 0.45;   // reflexo do ambiente nos materiais (1 = padrão, 
 const LUZ_BONECO = 0.9;    // luz que ilumina os bonecos e as peças fora do bake
 let ALTURA = 1.60;           // altura do boneco em metros (cada um ajusta a sua no passeio a dois)
 const ALTURA_MODELO = 1.75;  // o boneco foi desenhado com 1,75 m (até o topo do cabelo)
-const COR_ANFITRIAO = 0xd0794c, COR_CONVIDADO = 0x3f8f8a;
+// personagens do passeio a dois: modelos do Meshy com esqueleto, montados no personagens_blender.py
+const PERSONAGENS = {
+  lucas: { nome: "Lucas", cor: 0xd0794c, arquivo: "personagem_lucas.json" },
+  millena: { nome: "Millena", cor: 0x3f8f8a, arquivo: "personagem_millena.json" },
+};
+const ALTURA_PERSONAGEM = 1.60;  // altura com que os modelos foram exportados
 
 // ---------- renderer e cena ----------
 const container = document.getElementById("cena");
@@ -466,7 +495,8 @@ const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 8
 
 // A luz do apartamento vem assada do Blender nas texturas; estas luzes só iluminam os bonecos e as peças
 // que ficaram com material próprio (vidro, espelho, inox, telas), por isso não há sombras em tempo real.
-scene.add(new THREE.HemisphereLight(0xfff4e6, 0x8c7f70, LUZ_BONECO));
+const hemi = new THREE.HemisphereLight(0xfff4e6, 0x8c7f70, LUZ_BONECO);
+scene.add(hemi);
 const sol = new THREE.DirectionalLight(0xfff0dc, LUZ_BONECO * 1.2);
 sol.position.set(-0.55, 0.6, 0.75);
 scene.add(sol);
@@ -563,13 +593,10 @@ function uvCaixa(mesh) {
   g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
 }
 
-// ---------- colisão: caixas no plano (para o boneco) e em 3D (para a câmera não atravessar paredes) ----------
+// ---------- colisão: caixas no plano, para não atravessar paredes e móveis ----------
 const colisores = [];   // {x0, x1, z0, z1}
-const caixas3D = [];    // THREE.Box3 de paredes/móveis + teto
 const tetoObjs = [];
-let caixaTeto = null;
 const SEM_COLISAO = /^(Piso|Laje|Tapete|Cortina|Pendente|Quadro|Fita LED|LED|Spot)/;
-const TRANSPARENTES = new Set(["Vidro", "Globo de vidro", "Cortina voil"]);
 
 // sombra suave sob os bonecos (as sombras do apartamento já vêm assadas)
 const materialSombra = (() => {
@@ -580,9 +607,16 @@ const materialSombra = (() => {
   g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
   return new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, toneMapped: false });
 })();
+function criarSombra() {
+  const sombra = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), materialSombra);
+  sombra.rotation.x = -Math.PI / 2;
+  sombra.position.y = 0.025;  // acima dos tapetes
+  return sombra;
+}
 
 // ---------- boneco ----------
-function criarBoneco(corCamisa = COR_ANFITRIAO) {
+// boneco simples: aparece enquanto o modelo da outra pessoa baixa (ou se ele não carregar)
+function criarBoneco(corCamisa) {
   const grupo = new THREE.Group();
   const pele = new THREE.MeshStandardMaterial({ color: 0xc89c7c, roughness: 0.6 });
   const camisa = new THREE.MeshStandardMaterial({ color: corCamisa, roughness: 0.8 });
@@ -590,10 +624,6 @@ function criarBoneco(corCamisa = COR_ANFITRIAO) {
   const tenis = new THREE.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.6 });
   const cabelo = new THREE.MeshStandardMaterial({ color: 0x2a211b, roughness: 0.9 });
   const parte = (geo, mat) => new THREE.Mesh(geo, mat);
-  const sombra = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), materialSombra);
-  sombra.rotation.x = -Math.PI / 2;
-  sombra.position.y = 0.025;  // acima dos tapetes
-  grupo.add(sombra);
 
   const tronco = parte(new THREE.CapsuleGeometry(0.17, 0.42, 6, 16), camisa);
   tronco.position.y = 1.2; tronco.scale.set(1, 1, 0.68);
@@ -636,14 +666,11 @@ function animarCaminhada(b, fase, vel) {
   ud.bracoD.rotation.x = Math.sin(fase) * amp * 0.8;
   b.position.y = Math.abs(Math.sin(fase)) * 0.03 * Math.min(1, vel);
 }
-const boneco = criarBoneco();
-boneco.scale.setScalar(ALTURA / ALTURA_MODELO);
-scene.add(boneco);
 
 // ---------- estado do jogador ----------
 const RAIO = 0.22;
-const jogador = { pos: paraMundo(305, 395), yaw: Math.PI - 0.15, pitch: 0.3, pitchFP: -0.05, dist: 2.4,
-                  primeira: false, fase: 0, vel: 0 };
+// sempre em primeira pessoa; rot é para onde o corpo aponta (o que a outra pessoa vê no passeio a dois)
+const jogador = { pos: paraMundo(305, 395), yaw: Math.PI - 0.15, pitch: -0.05, rot: 0, vel: 0 };
 const teclas = new Set();
 const joy = { ativo: false, id: null, x0: 0, y0: 0, dx: 0, dy: 0 };
 const olhar = { id: null, x: 0, y: 0 };
@@ -667,39 +694,20 @@ function resolverColisao(p) {
   }
 }
 
-const raioTmp = new THREE.Ray();
-const pontoTmp = new THREE.Vector3();
-function distanciaLivre(origem, destino) {
-  const dir = destino.clone().sub(origem), max = dir.length();
-  dir.normalize();
-  raioTmp.set(origem, dir);
-  let melhor = max;
-  for (const b of caixas3D) {
-    if (b === caixaTeto && !tetoVisivel) continue;
-    if (b.containsPoint(origem)) continue;
-    if (raioTmp.intersectBox(b, pontoTmp)) {
-      const d = pontoTmp.distanceTo(origem);
-      if (d < melhor) melhor = d;
-    }
-  }
-  return Math.max(0.15, melhor - 0.18);
-}
-
 // ---------- entrada ----------
 const tela = renderer.domElement;
 addEventListener("keydown", (e) => {
   if (e.target.closest && e.target.closest("button, input")) return;
   teclas.add(e.code);
-  if (e.code === "KeyV") alternarVisao();
   if (e.code === "KeyT") alternarTeto();
+  if (e.code === "KeyN") alternarNoite();
 });
 addEventListener("keyup", (e) => teclas.delete(e.code));
 addEventListener("blur", () => teclas.clear());
 
 function girar(dx, dy) {
   jogador.yaw -= dx * 0.0045;
-  if (jogador.primeira) jogador.pitchFP = THREE.MathUtils.clamp(jogador.pitchFP - dy * 0.0035, -1.2, 1.2);
-  else jogador.pitch = THREE.MathUtils.clamp(jogador.pitch + dy * 0.0035, -0.25, 1.1);
+  jogador.pitch = THREE.MathUtils.clamp(jogador.pitch - dy * 0.0035, -1.2, 1.2);
 }
 
 tela.addEventListener("pointerdown", (e) => {
@@ -747,26 +755,129 @@ function soltar(e) {
 }
 tela.addEventListener("pointerup", soltar);
 tela.addEventListener("pointercancel", soltar);
-tela.addEventListener("wheel", (e) => {
-  e.preventDefault();
-  jogador.dist = THREE.MathUtils.clamp(jogador.dist + e.deltaY * 0.0025, 1.0, 4.0);
-}, { passive: false });
 
-const btnVisao = document.getElementById("btn-visao");
 const btnTeto = document.getElementById("btn-teto");
-function alternarVisao() {
-  jogador.primeira = !jogador.primeira;
-  btnVisao.setAttribute("aria-pressed", String(jogador.primeira));
-  boneco.visible = !jogador.primeira;
-}
 let tetoVisivel = true;
 function alternarTeto() {
   tetoVisivel = !tetoVisivel;
   tetoObjs.forEach((o) => (o.visible = tetoVisivel));
   btnTeto.setAttribute("aria-pressed", String(tetoVisivel));
 }
-btnVisao.addEventListener("click", alternarVisao);
 btnTeto.addEventListener("click", alternarTeto);
+
+// ---------- noite: a mesma cena assada com a luz da noite (as imagens só são baixadas na primeira vez) ----------
+const btnNoite = document.getElementById("btn-noite");
+const HORAS = {  // luz dos bonecos e das peças fora do bake; reflexo multiplica o envMapIntensity
+  dia: { hemi: [0xfff4e6, 0x8c7f70, LUZ_BONECO], sol: LUZ_BONECO * 1.2, reflexo: 1 },
+  noite: { hemi: [0xffd6a8, 0x3c3026, LUZ_BONECO * 0.5], sol: LUZ_BONECO * 0.3, reflexo: 0.3 },
+};
+const ceuDia = scene.background;
+let ceuNoite = null, noite = false, carregandoNoite = false;
+const trocas = [];  // {mat, dia, noite} das imagens assadas e {geo, dia, noite} das cores dos vértices
+
+function ceuNoiteTextura() {
+  const c = document.createElement("canvas");
+  c.width = 16; c.height = 256;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "#04060d"); grad.addColorStop(0.38, "#0b1124"); grad.addColorStop(0.49, "#2c2230");
+  grad.addColorStop(0.5, "#4a3426"); grad.addColorStop(0.53, "#17120f"); grad.addColorStop(1, "#060606");
+  g.fillStyle = grad; g.fillRect(0, 0, 16, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function base64ParaBlob(b64) {
+  const bruto = atob(b64), bytes = new Uint8Array(bruto.length);
+  for (let i = 0; i < bruto.length; i++) bytes[i] = bruto.charCodeAt(i);
+  return new Blob([bytes], { type: "image/jpeg" });
+}
+// decodifica do mesmo jeito que o GLTFLoader decodificou a imagem do dia (ImageBitmap ou <img>), para casar com as UVs
+async function decodificar(blob, comoDia) {
+  if (typeof ImageBitmap !== "undefined" && comoDia instanceof ImageBitmap) {
+    return createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+async function prepararNoite() {
+  const resp = await fetch("noite.json");
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} ao baixar noite.json`);
+  const imagens = await resp.json();
+  const pendentes = [];
+  for (const [nome, mat] of cacheMat) {
+    const b64 = mat.userData.assado && mat.map && imagens[nome.replace(/^Assado /, "")];
+    if (!b64) continue;
+    pendentes.push(decodificar(base64ParaBlob(b64), mat.map.image).then((img) => {
+      const t = mat.map.clone();
+      t.source = new THREE.Source(img);  // o clone dividiria a imagem com a textura do dia
+      t.needsUpdate = true;
+      trocas.push({ mat, dia: mat.map, noite: t });
+    }));
+  }
+  scene.traverse((o) => {
+    const cor = o.isMesh && o.material.userData?.assado && o.geometry.attributes._noite;  // "_NOITE" do glTF
+    if (cor) trocas.push({ geo: o.geometry, dia: o.geometry.attributes.color, noite: cor });
+  });
+  await Promise.all(pendentes);
+  ceuNoite = ceuNoiteTextura();
+}
+function aplicarHora() {
+  const h = noite ? HORAS.noite : HORAS.dia;
+  for (const t of trocas) {
+    if (t.mat) {
+      const antes = t.mat.map;
+      t.mat.map = noite ? t.noite : t.dia;
+      if (antes !== t.mat.map) antes.dispose();  // tira a outra hora da placa de vídeo (memória do celular)
+    } else {
+      t.geo.setAttribute("color", noite ? t.noite : t.dia);
+    }
+  }
+  scene.background = noite ? ceuNoite : ceuDia;
+  hemi.color.setHex(h.hemi[0]);
+  hemi.groundColor.setHex(h.hemi[1]);
+  hemi.intensity = h.hemi[2];
+  sol.intensity = h.sol;
+  scene.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (m.userData.assado || !("envMapIntensity" in m)) continue;
+      m.userData.reflexoDia ??= m.envMapIntensity;
+      m.envMapIntensity = m.userData.reflexoDia * h.reflexo;
+    }
+  });
+  btnNoite.setAttribute("aria-pressed", String(noite));
+}
+async function alternarNoite() {
+  if (carregandoNoite || !document.getElementById("carregando").hidden) return;
+  if (!ceuNoite) {
+    carregandoNoite = true;
+    btnNoite.disabled = true;
+    btnNoite.textContent = "Noite…";
+    try {
+      await prepararNoite();
+    } catch (erro) {
+      console.error(erro);
+      trocas.length = 0;
+      return;
+    } finally {
+      carregandoNoite = false;
+      btnNoite.disabled = false;
+      btnNoite.textContent = "Noite";
+    }
+  }
+  noite = !noite;
+  aplicarHora();
+}
+btnNoite.addEventListener("click", alternarNoite);
 
 // ---------- modo imersivo: esconde a interface e tenta tela cheia (nem todo celular permite) ----------
 const btnImersivo = document.getElementById("btn-imersivo");
@@ -851,7 +962,8 @@ addEventListener("keydown", (e) => {
 const PEERJS_URL = "https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js";
 const PREFIXO_SALA = "apto3d-lucas-";
 const podeDupla = !emMoldura && "RTCPeerConnection" in window;
-const dupla = { peer: null, conn: null, papel: null, codigo: null, outro: null, ultimoEnvio: 0, nome: "", altura: ALTURA };
+const dupla = { peer: null, conn: null, papel: null, codigo: null, outro: null, ultimoEnvio: 0, nome: "", altura: ALTURA,
+                personagem: "lucas" };
 const salaEl = document.getElementById("sala");
 const $sala = (id) => document.getElementById("sala-" + id);
 const companhia = document.getElementById("companhia");
@@ -863,11 +975,20 @@ function lerPreferencias() {
   try {
     dupla.nome = localStorage.getItem("passeio-nome") || dupla.nome;
     dupla.altura = parseFloat(localStorage.getItem("passeio-altura")) || dupla.altura;
+    const p = localStorage.getItem("passeio-personagem");
+    if (PERSONAGENS[p]) dupla.personagem = p;
   } catch (_) { /* sem armazenamento */ }
 }
 function salvarPreferencias() {
-  try { localStorage.setItem("passeio-nome", dupla.nome); localStorage.setItem("passeio-altura", String(dupla.altura)); }
-  catch (_) { /* sem armazenamento */ }
+  try {
+    localStorage.setItem("passeio-nome", dupla.nome);
+    localStorage.setItem("passeio-altura", String(dupla.altura));
+    localStorage.setItem("passeio-personagem", dupla.personagem);
+  } catch (_) { /* sem armazenamento */ }
+}
+function escolherPersonagem(chave) {
+  const r = salaEl.querySelector(`input[name="personagem"][value="${chave}"]`);
+  if (r) r.checked = true;
 }
 const linkSala = () => `${location.origin}${location.pathname}#sala-${dupla.codigo}`;
 const textoCompartilhar = () => (navigator.share ? "Compartilhar link" : "Copiar link");
@@ -893,14 +1014,14 @@ function mostrarSala(modo, erro = "") {
   if (comCampos) {
     $sala("nome").value = dupla.nome;
     $sala("altura").value = String(dupla.altura.toFixed(2)).replace(".", ",");
+    escolherPersonagem(dupla.personagem);
   }
   salaEl.hidden = false;
   (comCampos ? $sala("nome") : $sala("principal")).focus();
 }
 function fecharSala() { salaEl.hidden = true; tela.focus(); }
 function atualizarCompanhia(texto) { companhia.textContent = texto; companhia.hidden = !texto; }
-function aplicarMinhaAltura(m) { ALTURA = m; boneco.scale.setScalar(m / ALTURA_MODELO); }
-const corDaCamisa = (b) => b.userData.camisa.color.getHex();
+function aplicarMinhaAltura(m) { ALTURA = m; }
 
 let carregandoPeer = null;
 function carregarPeerJS() {
@@ -937,21 +1058,56 @@ function criarEtiqueta(texto) {
   s.renderOrder = 10;
   return s;
 }
+const modelosPersonagem = new Map();  // chave -> Promise do glTF (só baixa o personagem que a outra pessoa escolheu)
+function carregarPersonagem(chave) {
+  if (!modelosPersonagem.has(chave)) {
+    const promessa = fetch(PERSONAGENS[chave].arquivo)
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); })
+      .then(gltfDeTexto);
+    promessa.catch(() => modelosPersonagem.delete(chave));  // tenta de novo na próxima vez
+    modelosPersonagem.set(chave, promessa);
+  }
+  return modelosPersonagem.get(chave);
+}
 function removerOutro() {
   if (!dupla.outro) return;
+  dupla.outro.mixer?.stopAllAction();
   scene.remove(dupla.outro.boneco);
   dupla.outro = null;
 }
-function criarOutro(nome, altura, cor) {
+function criarOutro(nome, altura, chave) {
   removerOutro();
-  const b = criarBoneco(cor);
-  b.scale.setScalar(altura / ALTURA_MODELO);
+  const { cor } = PERSONAGENS[chave];
+  const grupo = new THREE.Group();
+  const reserva = criarBoneco(cor);
+  reserva.scale.setScalar(altura / ALTURA_MODELO);
   const etiqueta = criarEtiqueta(nome);
-  etiqueta.position.y = ALTURA_MODELO + 0.3;
-  b.add(etiqueta);
-  b.position.copy(jogador.pos);
-  scene.add(b);
-  dupla.outro = { boneco: b, alvo: b.position.clone(), rotAlvo: 0, vel: 0, fase: 0, nome, cor };
+  etiqueta.position.y = altura + 0.25;
+  grupo.add(reserva, etiqueta, criarSombra());
+  grupo.position.copy(jogador.pos);
+  scene.add(grupo);
+  const outro = { boneco: grupo, reserva, mixer: null, acoes: {}, alvo: grupo.position.clone(), rotAlvo: 0, vel: 0,
+                  fase: 0, nome, cor };
+  dupla.outro = outro;
+  carregarPersonagem(chave).then((gltf) => {
+    if (dupla.outro !== outro) return;
+    const modelo = gltf.scene;
+    modelo.scale.setScalar(altura / ALTURA_PERSONAGEM);
+    modelo.traverse((o) => {
+      if (!o.isMesh) return;
+      o.frustumCulled = false;  // a caixa da malha é a da pose de repouso; animada, ela erra
+      if ("envMapIntensity" in o.material) o.material.envMapIntensity = LUZ_AMBIENTE;
+    });
+    outro.mixer = new THREE.AnimationMixer(modelo);
+    for (const clipe of gltf.animations) {
+      const nomeClipe = ["parado", "andando", "correndo"].find((n) => clipe.name.includes(n));
+      if (!nomeClipe) continue;
+      outro.acoes[nomeClipe] = outro.mixer.clipAction(clipe).setEffectiveWeight(nomeClipe === "parado" ? 1 : 0).play();
+    }
+    grupo.remove(reserva);
+    grupo.add(modelo);
+    outro.reserva = null;
+  }).catch((e) => console.warn("Personagem não carregou; fica o boneco simples.", e));
 }
 function sairOutro() {
   const nome = dupla.outro?.nome || "A outra pessoa";
@@ -969,7 +1125,8 @@ function receber(m) {
   if (!m || typeof m !== "object") return;
   if (m.t === "ola") {
     const nome = String(m.nome || "Visitante").slice(0, 20);
-    criarOutro(nome, THREE.MathUtils.clamp(+m.altura || 1.6, 1.2, 2.1), +m.cor || COR_CONVIDADO);
+    const outroPersonagem = PERSONAGENS[m.personagem] ? m.personagem : (dupla.personagem === "lucas" ? "millena" : "lucas");
+    criarOutro(nome, THREE.MathUtils.clamp(+m.altura || 1.6, 1.2, 2.1), outroPersonagem);
     atualizarCompanhia(`Com ${nome}`);
   } else if (m.t === "p" && dupla.outro) {
     dupla.outro.alvo.set(+m.x || 0, 0, +m.z || 0);
@@ -984,7 +1141,7 @@ function receber(m) {
 function ligarConexao(c) {
   dupla.conn = c;
   c.on("open", () => {
-    c.send({ t: "ola", nome: dupla.nome, altura: dupla.altura, cor: corDaCamisa(boneco) });
+    c.send({ t: "ola", nome: dupla.nome, altura: dupla.altura, personagem: dupla.personagem });
     fecharSala();
   });
   c.on("data", receber);
@@ -998,7 +1155,6 @@ async function criarSala() {
   encerrarDupla();
   dupla.papel = "anfitriao";
   dupla.codigo = gerarCodigo();
-  boneco.userData.camisa.color.setHex(COR_ANFITRIAO);
   const peer = new window.Peer(PREFIXO_SALA + dupla.codigo);
   dupla.peer = peer;
   peer.on("open", () => { mostrarSala("aberta"); atualizarCompanhia("Sala aberta · esperando"); });
@@ -1022,7 +1178,6 @@ async function entrarSala() {
   try { await carregarPeerJS(); } catch (_) { return mostrarSala("entrar", "Não deu para conectar sem internet. Tente de novo."); }
   encerrarDupla();
   dupla.papel = "convidado";
-  boneco.userData.camisa.color.setHex(COR_CONVIDADO);
   jogador.pos.copy(paraMundo(250, 215));
   const peer = new window.Peer();
   dupla.peer = peer;
@@ -1065,11 +1220,17 @@ $sala("form").addEventListener("submit", (e) => {
   if (!nome) return mostrarSala(modoSala, "Escreva seu nome.");
   if (!(altura >= 1.2 && altura <= 2.1)) return mostrarSala(modoSala, "Coloque a altura em metros, por exemplo 1,60.");
   dupla.nome = nome; dupla.altura = altura;
+  dupla.personagem = salaEl.querySelector('input[name="personagem"]:checked')?.value || dupla.personagem;
   salvarPreferencias();
   aplicarMinhaAltura(altura);
   (modoSala === "criar" ? criarSala : entrarSala)();
 });
 $sala("fechar").addEventListener("click", fecharSala);
+$sala("nome").addEventListener("input", () => {  // ao digitar Lucas ou Millena, o personagem acompanha
+  const ini = $sala("nome").value.trim().toLowerCase().slice(0, 3);
+  const chave = ini.length === 3 && Object.keys(PERSONAGENS).find((k) => k.startsWith(ini));
+  if (chave) escolherPersonagem(chave);
+});
 btnDois.addEventListener("click", () => {
   lerPreferencias();
   if (dupla.papel === "anfitriao" && dupla.peer && !dupla.peer.destroyed) mostrarSala("aberta");
@@ -1082,6 +1243,21 @@ function abrirConviteDoLink() {
   lerPreferencias();
   mostrarSala("entrar");
 }
+// mistura parado, andando e correndo pela velocidade que a outra pessoa manda
+function animarOutro(o, dt) {
+  if (!o.mixer) {
+    o.fase += dt * o.vel * 5.2;
+    animarCaminhada(o.reserva, o.fase, o.vel);
+    return;
+  }
+  const v = o.vel, limitar = THREE.MathUtils.clamp, a = o.acoes;
+  const correr = limitar((v - 1.4) / 1.2, 0, 1);
+  const andar = v < 1.4 ? limitar(v / 0.5, 0, 1) : 1 - correr;
+  a.parado?.setEffectiveWeight(1 - andar - correr);
+  if (a.andando) { a.andando.setEffectiveWeight(andar); a.andando.timeScale = limitar(v / 1.4, 0.6, 1.5); }
+  if (a.correndo) { a.correndo.setEffectiveWeight(correr); a.correndo.timeScale = limitar(v / 2.8, 0.7, 1.3); }
+  o.mixer.update(dt);
+}
 function atualizarDupla(dt) {
   const o = dupla.outro;
   if (o) {
@@ -1091,15 +1267,14 @@ function atualizarDupla(dt) {
     let delta = o.rotAlvo - b.rotation.y;
     delta = Math.atan2(Math.sin(delta), Math.cos(delta));
     b.rotation.y += delta * k;
-    o.fase += dt * o.vel * 5.2;
-    animarCaminhada(b, o.fase, o.vel);
+    animarOutro(o, dt);
   }
   const agora = performance.now();
   if (dupla.conn && dupla.conn.open && agora - dupla.ultimoEnvio > 66) {  // ~15 vezes por segundo
     dupla.ultimoEnvio = agora;
     try {
       dupla.conn.send({ t: "p", x: +jogador.pos.x.toFixed(3), z: +jogador.pos.z.toFixed(3),
-                        r: +boneco.rotation.y.toFixed(3), v: +jogador.vel.toFixed(2) });
+                        r: +jogador.rot.toFixed(3), v: +jogador.vel.toFixed(2) });
     } catch (_) { /* conexão caindo */ }
   }
 }
@@ -1162,7 +1337,7 @@ function desenharMinimapa() {
   const [u, v] = noMapa(jogador.pos);
   const fx = -Math.sin(jogador.yaw), fz = -Math.cos(jogador.yaw);
   const ang = Math.atan2(fz, fx);
-  const minhaCor = "#" + boneco.userData.camisa.color.getHexString();
+  const minhaCor = "#" + PERSONAGENS[dupla.personagem].cor.toString(16).padStart(6, "0");
   mctx.save();
   mctx.translate(u, v); mctx.rotate(ang);
   mctx.globalAlpha = 0.25; mctx.fillStyle = minhaCor;
@@ -1212,15 +1387,19 @@ async function carregarColisores() {
   if (!resp.ok) throw new Error(`HTTP ${resp.status} ao baixar colisores.json`);
   return resp.json();
 }
-async function carregarModelo() {
-  const gltf = JSON.parse(await baixarTexto("apartamento.json"));
+function gltfDeTexto(texto) {
+  const gltf = JSON.parse(texto);
   const uri = gltf.buffers[0].uri;
   const b64 = uri.slice(uri.indexOf(",") + 1);
   const bruto = atob(b64), bin = new Uint8Array(bruto.length);
   for (let i = 0; i < bruto.length; i++) bin[i] = bruto.charCodeAt(i);
   delete gltf.buffers[0].uri;
-  progresso.style.width = "95%";
   return new Promise((ok, falha) => new GLTFLoader().parse(montarGLB(gltf, bin), "", ok, falha));
+}
+async function carregarModelo() {
+  const texto = await baixarTexto("apartamento.json");
+  progresso.style.width = "95%";
+  return gltfDeTexto(texto);
 }
 
 Promise.all([carregarModelo(), carregarColisores()]).then(([gltf, caixas]) => {
@@ -1235,13 +1414,11 @@ Promise.all([carregarModelo(), carregarColisores()]).then(([gltf, caixas]) => {
     if (/^(Assado.teto|Teto|Spot)/.test(o.name)) tetoObjs.push(o);
   });
   // as peças foram juntadas em blocos no bake; as caixas de cada peça vêm à parte, medidas no Blender
-  for (const { n, m, b: [x0, x1, y0, y1, z0, z1] } of caixas) {
+  for (const { n, b: [x0, x1, y0, y1, z0, z1] } of caixas) {
     const caixa = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
-    if (n === "Teto") { caixaTeto = caixa; caixas3D.push(caixa); continue; }
     if (SEM_COLISAO.test(n)) continue;
     const tam = caixa.getSize(new THREE.Vector3());
     if (y1 > 0.1 && y0 < 1.6 && tam.x * tam.z > 0.0004) colisores.push({ x0, x1, z0, z1 });
-    if (tam.y > 0.5 && !TRANSPARENTES.has(m)) caixas3D.push(caixa);
   }
   scene.add(raiz);
   document.getElementById("carregando").hidden = true;
@@ -1276,34 +1453,22 @@ function quadro() {
   const correndo = teclas.has("ShiftLeft") || teclas.has("ShiftRight") || (joy.ativo && Math.hypot(joy.dx, joy.dy) > 0.95);
   const alvoVel = intensidade * (correndo ? 2.8 : 1.4);
   jogador.vel += (alvoVel - jogador.vel) * Math.min(1, dt * 10);
+  // o corpo vira para onde anda; parado, para onde olha
+  let alvoRot = Math.atan2(frente.x, frente.z);
   if (intensidade > 0.01) {
     mov.normalize();
     jogador.pos.addScaledVector(mov, jogador.vel * dt);
-    const alvoRot = Math.atan2(mov.x, mov.z);
-    let delta = alvoRot - boneco.rotation.y;
-    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-    boneco.rotation.y += delta * Math.min(1, dt * 12);
+    alvoRot = Math.atan2(mov.x, mov.z);
   }
+  const giro = alvoRot - jogador.rot;
+  jogador.rot += Math.atan2(Math.sin(giro), Math.cos(giro)) * Math.min(1, dt * 10);
+  jogador.rot = Math.atan2(Math.sin(jogador.rot), Math.cos(jogador.rot));
   resolverColisao(jogador.pos);
-  boneco.position.copy(jogador.pos);
-
-  // caminhada
-  jogador.fase += dt * jogador.vel * 5.2;
-  animarCaminhada(boneco, jogador.fase, jogador.vel);
   atualizarDupla(dt);
 
-  // câmera
-  if (jogador.primeira) {
-    camera.position.copy(jogador.pos).setY(ALTURA - 0.10);
-    camera.rotation.set(jogador.pitchFP, yaw, 0, "YXZ");
-  } else {
-    const pivo = jogador.pos.clone().setY(ALTURA - 0.25);
-    const c = Math.cos(jogador.pitch);
-    const desejo = pivo.clone().add(new THREE.Vector3(Math.sin(yaw) * c, Math.sin(jogador.pitch), Math.cos(yaw) * c).multiplyScalar(jogador.dist));
-    const d = distanciaLivre(pivo, desejo);
-    camera.position.copy(pivo).add(desejo.sub(pivo).normalize().multiplyScalar(d));
-    camera.lookAt(pivo);
-  }
+  // câmera nos olhos
+  camera.position.copy(jogador.pos).setY(ALTURA - 0.10);
+  camera.rotation.set(jogador.pitch, yaw, 0, "YXZ");
 
   const nome = nomeDoComodo(paraPlanta(jogador.pos));
   if (nome !== ultimoComodo) { comodoEl.textContent = nome; ultimoComodo = nome; }
